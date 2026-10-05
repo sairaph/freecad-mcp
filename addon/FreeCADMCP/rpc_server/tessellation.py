@@ -215,6 +215,135 @@ def mesh_object(obj: Any, settings: Settings) -> Any:
     return mesh_shape(shape, settings)
 
 
+def contained_meshes(obj: Any, seen: set[int] | None = None) -> list:
+    """Mesh::Feature objects in ``obj``'s ``Group`` tree, recursively.
+
+    A container's own Part shape (a compound of its Part children,
+    Mod/Part/App/PartFeature.cpp:1015-1035) never includes a Mesh::Feature
+    child, so a mixed container passes a has-shape test on its shape alone
+    and its meshes would otherwise vanish from a mesh export with no sign of
+    it (unlike a mesh-only container, which has no shape of its own).
+    """
+    if seen is None:
+        seen = set()
+    found = []
+    for child in getattr(obj, "Group", None) or []:
+        child_id = id(child)
+        if child_id in seen:
+            continue
+        seen.add(child_id)
+        if is_mesh_feature(child):
+            found.append(child)
+        else:
+            found.extend(contained_meshes(child, seen))
+    return found
+
+
+def _feature_box(obj: Any) -> Any:
+    """The global bounding box of a Mesh::Feature, or None for an empty mesh.
+
+    ``obj.Mesh.BoundBox`` already includes the object's own Placement (the
+    mesh carries it as its transform), so it is read as it is; only an
+    enclosing container adds a transform, and then the mesh is copied with the
+    global placement, which counts every Placement once.
+    """
+    try:
+        mesh = obj.Mesh
+        if mesh is None or mesh.CountFacets <= 0:
+            return None
+        container = container_placement(obj)
+        if container is not None and not container.isIdentity():
+            mesh = mesh.copy()
+            mesh.Placement = obj.getGlobalPlacement()
+        box = mesh.BoundBox
+        return box if box.isValid() else None
+    except Exception:
+        return None
+
+
+def _link_mesh_target(obj: Any) -> Any:
+    """The non-empty Mesh::Feature that link ``obj`` shows, or None."""
+    if not callable(getattr(obj, "getLinkedObject", None)):
+        return None
+    try:
+        target = obj.getLinkedObject(True)
+        if target is None or target is obj or not is_mesh_feature(target):
+            return None
+        return target if target.Mesh.CountFacets > 0 else None
+    except Exception:
+        return None
+
+
+def has_mesh(obj: Any, seen: set[str] | None = None) -> bool:
+    """Whether ``obj`` is, links to or holds a non-empty mesh: what
+    ``mesh_boxes`` would find, without copying or measuring any mesh."""
+    if seen is None:
+        seen = set()
+    if obj.Name in seen:
+        return False
+    seen.add(obj.Name)
+    if is_mesh_feature(obj):
+        try:
+            return obj.Mesh.CountFacets > 0
+        except Exception:
+            return False
+    if _link_mesh_target(obj) is not None:
+        return True
+    return any(has_mesh(child, seen) for child in getattr(obj, "Group", None) or [])
+
+
+def _link_box(obj: Any) -> Any:
+    """The global bounding box of a mesh that link ``obj`` shows, or None.
+
+    ``getLinkedObject(True, Matrix(), True)`` gives the transform that places
+    the target as the link shows it (the link's own Placement, with the
+    target's when ``LinkTransform`` is set); the enclosing container's
+    placement goes on top.
+    """
+    target = _link_mesh_target(obj)
+    if target is None:
+        return None
+    try:
+        import FreeCAD as App
+
+        placement = App.Placement(obj.getLinkedObject(True, App.Matrix(), True)[1])
+        container = container_placement(obj)
+        if container is not None:
+            placement = container.multiply(placement)
+        mesh = target.Mesh.copy()
+        mesh.Placement = placement
+        box = mesh.BoundBox
+        return box if box.isValid() else None
+    except Exception:
+        return None
+
+
+def mesh_boxes(obj: Any, seen: set[str] | None = None) -> list:
+    """The global bounding boxes of the meshes ``obj`` is or holds.
+
+    A Mesh::Feature gives its own box, a link to one the box where the link
+    shows it, and a container or group the boxes of its members, recursively.
+    Nothing is tessellated or converted: a mesh is only read for its bounds.
+    """
+    if seen is None:
+        seen = set()
+    if obj.Name in seen:
+        return []
+    seen.add(obj.Name)
+    boxes = []
+    if is_mesh_feature(obj):
+        box = _feature_box(obj)
+        if box is not None:
+            boxes.append(box)
+        return boxes
+    box = _link_box(obj)
+    if box is not None:
+        boxes.append(box)
+    for child in getattr(obj, "Group", None) or []:
+        boxes.extend(mesh_boxes(child, seen))
+    return boxes
+
+
 def parent_map(doc: Any) -> dict[str, str]:
     """Return child object Name -> parent object Name, as FreeCAD's tree view
     nests them.

@@ -74,7 +74,8 @@ print(bolt.isValid(), len(bolt.Solids), bolt.Volume)
 
 - Assigning a translated shape to obj.Shape sets obj.Placement from the shape's location, so setting obj.Placement afterwards throws the translation away. Set the Placement alone on an untransformed shape, or bake the move into the geometry with Shape.transformGeometry(matrix) so the shape carries an identity location.
 - A Placement or Rotation with angle 0 loses its axis: FreeCAD.Rotation(FreeCAD.Vector(0, 0, 1), 0) is the identity and reads back as axis (0, 0, 1) angle 0 whatever axis you gave. Do not read an axis from a zero angle.
-- Shape.BoundBox is loose on curved shapes, and get_object reports it. Use Shape.optimalBoundingBox(False, False) for the true size; check_printability reports that one.
+- Shape.BoundBox is loose on curved and swept shapes (a thread's box can be a third too wide). get_object and check_printability report the tight box. In a script, use Shape.optimalBoundingBox(False, False), never the vertices of a mesh.
+- Mesh.BoundBox and the Points of a Mesh already include its Placement. Do not add the Placement again. Read mesh.md.
 - A Part.Compound, which booleans often return, has no CenterOfMass. Take Shape.Solids[0], or iterate Shape.Solids and use each solid's CenterOfMass.
 - A helical thread cutter swept along a Part.makeHelix whose height is not a whole number of pitches can silently give an empty or zero-volume solid. Make the helix height a whole number of turns, then check the cutter's Volume > 0 before cutting.
 - Heavy geometry (sweeps, threads, many-tool booleans) belongs in execute_code_headless: a crash there does not take FreeCAD down.

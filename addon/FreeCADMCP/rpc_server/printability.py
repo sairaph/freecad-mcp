@@ -7,6 +7,11 @@ volume (the volume of their solid intersection, not only of their bounding
 boxes, which a bracket around another part would overlap). Each part reports
 its size and its free margin to the plate edges.
 
+A mesh (a Mesh::Feature, or a link or container holding one) is never meshed
+or converted: its global bounding box is its extent, and a pair with a mesh
+overlaps when their boxes share volume, so a part nested in a mesh's box counts
+as overlapping. Only two solids get the exact intersection.
+
 Boolean common of two heavy shapes can take long, and it runs on FreeCAD's GUI
 thread, so pairs are checked only while the call's timeout has time left; the
 pairs left are listed as not checked, never guessed.
@@ -25,7 +30,7 @@ from rpc_server.lookup import require_document, require_object
 from rpc_server.options import check_options
 from rpc_server.plate import TOUCH_TOLERANCE_MM as _TOUCH_TOLERANCE_MM
 from rpc_server.plate import plate_margins
-from rpc_server.serialize import bound_box_list, finite_or_none, tight_bound_box, visibility_of
+from rpc_server.serialize import finite_or_none, tight_bound_box, visibility_of
 
 
 PRINTABILITY_TIMEOUT = 120.0
@@ -127,7 +132,13 @@ def _check_printability_gui(
         for overlap in overlaps:
             if part["name"] in (overlap["a"], overlap["b"]):
                 other = overlap["b"] if part["name"] == overlap["a"] else overlap["a"]
-                part["issues"].append(f"overlaps {other} by {overlap['volume_mm3']:.2f} mm^3")
+                if overlap["by"] == "bounding box":
+                    part["issues"].append(
+                        f"overlaps {other}: their bounding boxes share {overlap['volume_mm3']:.2f} mm^3 "
+                        "(a mesh is checked by bounding box, so a part nested in the other's box counts as overlapping)"
+                    )
+                else:
+                    part["issues"].append(f"overlaps {other} by {overlap['volume_mm3']:.2f} mm^3")
 
     results = [{k: v for k, v in part.items() if not k.startswith("_")} for part in parts]
     # An empty result is never printable: nothing was checked.
@@ -147,7 +158,7 @@ def _resolve_objects(doc: Any, object_names: list[str] | None) -> tuple[list[Any
     """The parts to check, or a failure reply.
 
     Given names must all resolve; without them, the visible top-level objects
-    (as the FreeCAD tree shows them) that have a solid.
+    (as the FreeCAD tree shows them) that have a solid or a mesh.
     """
     if object_names:
         objects = []
@@ -167,7 +178,7 @@ def _resolve_objects(doc: Any, object_names: list[str] | None) -> tuple[list[Any
             has_solid = shape is not None and len(shape.Solids) > 0
         except Exception:
             has_solid = False
-        if has_solid:
+        if has_solid or tessellation.has_mesh(obj):
             objects.append(obj)
     return objects, None
 
@@ -183,22 +194,32 @@ def _part(obj: Any, plate: list[float], origin: list[float]) -> dict[str, Any]:
         "free_margin_mm": None,
         "inside": False,
         "issues": [],
+        "overlap_checked_by": None,
         "_shape": None,
         "_box": None,
+        "_by_box": False,
     }
     shape = tessellation.shape_of(obj)
     try:
         has_solid = shape is not None and len(shape.Solids) > 0
     except Exception:
         has_solid = False
-    if not has_solid:
-        part["issues"].append("has no solid shape to place on the plate")
+    mesh_boxes = tessellation.mesh_boxes(obj)
+    if not has_solid and not mesh_boxes:
+        part["issues"].append("has no solid or mesh shape to place on the plate")
         return part
-    bb = tight_bound_box(shape)
-    box = (bb.XMin, bb.YMin, bb.ZMin, bb.XMax, bb.YMax, bb.ZMax)
-    part["_shape"], part["_box"] = shape, box
+    boxes = [_box_tuple(bb) for bb in mesh_boxes]
+    if has_solid:
+        boxes.append(_box_tuple(tight_bound_box(shape)))
+    box = (
+        min(b[0] for b in boxes), min(b[1] for b in boxes), min(b[2] for b in boxes),
+        max(b[3] for b in boxes), max(b[4] for b in boxes), max(b[5] for b in boxes),
+    )
+    # A mesh is never converted, so a part with one is checked by its box.
+    part["_shape"], part["_box"], part["_by_box"] = shape if has_solid else None, box, bool(mesh_boxes)
+    part["overlap_checked_by"] = "bounding box" if mesh_boxes else "solid"
     part["size"] = [finite_or_none(round(box[i + 3] - box[i], 4)) for i in range(3)]
-    part["bound_box"] = bound_box_list(bb)
+    part["bound_box"] = [finite_or_none(v) for v in box]
 
     margins, free, problems = plate_margins(box, plate, origin)
     part["margin_mm"] = margins
@@ -208,10 +229,21 @@ def _part(obj: Any, plate: list[float], origin: list[float]) -> dict[str, Any]:
     return part
 
 
+def _box_tuple(bb: Any) -> tuple:
+    return (bb.XMin, bb.YMin, bb.ZMin, bb.XMax, bb.YMax, bb.ZMax)
+
+
 def _boxes_overlap(a: tuple, b: tuple) -> bool:
     return all(
         a[i] < b[i + 3] - _TOUCH_TOLERANCE_MM and b[i] < a[i + 3] - _TOUCH_TOLERANCE_MM for i in range(3)
     )
+
+
+def _box_overlap_volume(a: tuple, b: tuple) -> float:
+    volume = 1.0
+    for i in range(3):
+        volume *= max(0.0, min(a[i + 3], b[i + 3]) - max(a[i], b[i]))
+    return volume
 
 
 def _overlaps(parts: list[dict[str, Any]], budget_ok: Any) -> tuple[list[dict], list[dict]]:
@@ -220,9 +252,15 @@ def _overlaps(parts: list[dict[str, Any]], budget_ok: Any) -> tuple[list[dict], 
     not_checked: list[dict] = []
     for i, first in enumerate(parts):
         for second in parts[i + 1:]:
-            if first["_shape"] is None or second["_shape"] is None:
+            if first["_box"] is None or second["_box"] is None:
                 continue
             if not _boxes_overlap(first["_box"], second["_box"]):
+                continue
+            if first["_by_box"] or second["_by_box"]:
+                volume = _box_overlap_volume(first["_box"], second["_box"])
+                if volume > _OVERLAP_VOLUME_MM3:
+                    overlaps.append({"a": first["name"], "b": second["name"], "volume_mm3": round(volume, 4),
+                                     "by": "bounding box"})
                 continue
             if not budget_ok():
                 not_checked.append({"a": first["name"], "b": second["name"],
@@ -235,5 +273,6 @@ def _overlaps(parts: list[dict[str, Any]], budget_ok: Any) -> tuple[list[dict], 
                                     "reason": f"the intersection failed: {type(e).__name__}: {e}"})
                 continue
             if volume > _OVERLAP_VOLUME_MM3:
-                overlaps.append({"a": first["name"], "b": second["name"], "volume_mm3": round(volume, 4)})
+                overlaps.append({"a": first["name"], "b": second["name"], "volume_mm3": round(volume, 4),
+                                 "by": "solid"})
     return overlaps, not_checked

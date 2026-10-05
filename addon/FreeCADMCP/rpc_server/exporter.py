@@ -1,7 +1,8 @@
 """Export objects of a document to a file.
 
 Mesh formats are tessellated with tessellation.py into a temporary hidden
-document and written with Mesh.export; STEP/IGES and glTF go through
+document and written with Mesh.export (a 3MF then gets each object's label as
+its name from threemf_names, which Mesh.export leaves out); STEP/IGES and glTF go through
 ImportGui.export; BREP through Part.makeCompound(...).exportBrep; FCStd
 through doc.saveCopy; DXF and SVG through importDXF.export and
 importSVG.export. Every export is verified on disk, because Mesh.export (and
@@ -22,7 +23,7 @@ from typing import Any
 
 import FreeCAD as App
 
-from rpc_server import gui_task, tessellation
+from rpc_server import gui_task, tessellation, threemf_names
 from rpc_server.agent_log import agent_warning
 from rpc_server.errors import (
     CONFLICT,
@@ -134,31 +135,6 @@ def _mesh_reachable_via(obj: Any) -> bool:
         if tessellation.is_mesh_feature(child):
             return True
     return False
-
-
-def _contained_meshes(obj: Any, seen: set[int] | None = None) -> list:
-    """Mesh::Feature objects in ``obj``'s ``Group`` tree, recursively.
-
-    A container's own Part shape (a compound of its Part children,
-    Mod/Part/App/PartFeature.cpp:1015-1035) never includes a Mesh::Feature
-    child, so a mixed container passes ``_has_geometry`` on its shape alone
-    and its meshes would otherwise vanish from a mesh export with no sign of
-    it (unlike a mesh-only container, which ``_mesh_reachable_via`` already
-    catches because such a container has no shape of its own).
-    """
-    if seen is None:
-        seen = set()
-    found = []
-    for child in getattr(obj, "Group", None) or []:
-        child_id = id(child)
-        if child_id in seen:
-            continue
-        seen.add(child_id)
-        if tessellation.is_mesh_feature(child):
-            found.append(child)
-        else:
-            found.extend(_contained_meshes(child, seen))
-    return found
 
 
 def _validate_options(options: Any) -> dict[str, Any]:
@@ -652,7 +628,7 @@ def _export(doc_name: str, path: str, ext: str, opts: dict[str, Any]) -> dict[st
         for obj in objects:
             if tessellation.is_mesh_feature(obj):
                 continue
-            for mesh_child in _contained_meshes(obj):
+            for mesh_child in tessellation.contained_meshes(obj):
                 if mesh_child.Name in exported_names or mesh_child.Name in reported_meshes:
                     continue
                 reported_meshes.add(mesh_child.Name)
@@ -756,6 +732,18 @@ def _export(doc_name: str, path: str, ext: str, opts: dict[str, Any]) -> dict[st
     ok, size = _verify_written(path, before)
     if not ok:
         return fail(FREECAD_ERROR, "The exporter wrote no file")
+
+    if ext == "3mf":
+        # Mesh.export writes no object names, so a slicer would list the parts
+        # as "object 1" to "object N"; give each its label. The file is valid
+        # without them, so a failure here is a warning, not an export failure.
+        try:
+            threemf_names.name_objects(path, [obj.Label for obj in objects])
+            size = os.path.getsize(path)
+        except Exception as e:
+            warnings.append(
+                f"The 3MF was written without object names ({type(e).__name__}: {e}); a slicer lists the parts as object 1, 2, ..."
+            )
 
     companion_file = None
     if ext == "gltf":

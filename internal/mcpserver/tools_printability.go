@@ -54,6 +54,9 @@ func partFacts(obj map[string]any) []string {
 	if margin, ok := number(obj["free_margin_mm"]); ok {
 		facts = append(facts, fmt.Sprintf("free margin to the plate edges %.4g mm", margin))
 	}
+	if str(obj, "overlap_checked_by") == "bounding box" {
+		facts = append(facts, "a mesh, so overlap is checked by its bounding box")
+	}
 	return facts
 }
 
@@ -111,7 +114,7 @@ func (s *Server) checkPrintability(ctx context.Context, _ *mcp.CallToolRequest, 
 	var body strings.Builder
 	switch {
 	case len(objects) == 0:
-		fmt.Fprintf(&body, "No solid parts were found to check in '%s'. Pass object_names, or make a part visible; "+
+		fmt.Fprintf(&body, "No solid or mesh parts were found to check in '%s'. Pass object_names, or make a part visible; "+
 			"list_objects with {\"doc_name\": %q} shows the document.", in.DocName, in.DocName)
 	case printable:
 		fmt.Fprintf(&body, "Document '%s': all %d part(s) lie inside the %s and none overlap.\n", in.DocName, len(objects), plate)
