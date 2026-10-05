@@ -206,7 +206,7 @@ var toolTexts = map[string]toolText{
 		},
 	},
 	"get_object": {
-		Description: `Get one object with its type and all properties, including its bounding box (fast, and possibly loose on curved parts; check_printability reports the tight size). Use it to check values after create_object or update_object and to see which properties an object has. No screenshot unless include_screenshot is true.`,
+		Description: `Get one object with its type and all properties, including its tight bounding box (exact on curved and swept parts, not the loose box of FreeCAD's Shape.BoundBox). Use it to check values after create_object or update_object and to see which properties an object has. No screenshot unless include_screenshot is true.`,
 		Params:      map[string]string{"include_screenshot": noScreenshotText},
 	},
 	"list_subelements": {
@@ -347,9 +347,9 @@ FEM: create Fem::AnalysisPython first; pass analysis_name for its material, cons
 
 	// Mesh and printing.
 	"check_printability": {
-		Description: `Check a print layout: every listed part lies inside the plate (x and y from its corner, which is 0, 0 unless you pass bed_origin_x and bed_origin_y; z up from 0) and no two parts overlap. Lay each part flat on the plate with its Placement and space the parts apart first, then call this; overlapping complex parts such as threads make the intersection slow. Per part: size, free margin to the plate edges, and what it overlaps; overlap is the volume of the parts' solid intersection, so a part sitting in another's cavity is fine. No meshing, so it is fast. Move parts with update_object until printable is true. printable is true only when something was checked, every part is inside and none overlaps. Find failed features with recompute_document; analyze_mesh checks mesh defects.`,
+		Description: `Check a print layout: every listed part lies inside the plate (x and y from its corner, which is 0, 0 unless you pass bed_origin_x and bed_origin_y; z up from 0) and no two parts overlap. Solids and meshes both work. Lay each part flat on the plate with its Placement and space the parts apart first, then call this; overlapping complex parts such as threads make the intersection slow. Per part: tight size, free margin to the plate edges, and what it overlaps. Two solids overlap by the volume of their solid intersection, so a part in another's cavity is fine; a mesh is checked by its bounding box, so a part nested in a mesh's box counts as overlapping. Nothing is meshed, so it is fast. Move parts with update_object until printable is true. printable is true only when something was checked, every part is inside and none overlaps. Find failed features with recompute_document; analyze_mesh checks mesh defects.`,
 		Params: map[string]string{
-			"object_names": "object names to check (default: visible top-level solids)",
+			"object_names": "object names to check (default: visible top-level solids and meshes)",
 			"bed_x":        "plate width in mm, x from the plate's corner",
 			"bed_y":        "plate depth in mm, y from the plate's corner",
 			"bed_z":        "build height in mm, z from 0 (default: height not checked)",

@@ -352,7 +352,8 @@ The reply gives the value and its unit (`mm`, `deg`, `mm^2`, `mm^3`), and for
 object that does resolve to a shape is a not-found error whose hint points to
 `list_subelements` for the object's face and edge names; `volume` on an
 object with no solid is an invalid-input error. `get_object`'s bounding box
-also helps size an object without a full measurement.
+(the tight one, exact on curved and swept parts) also helps size an object
+without a full measurement.
 
 ### `get_selection`
 
@@ -591,7 +592,10 @@ The format follows the extension of `path`: `.stl` (binary, or ASCII with
 `ascii` true), `.ast`, `.3mf`, `.amf`, `.obj`, `.ply` and `.off` are triangle
 meshes for slicers, tessellated with `quality` or explicit
 `linear_deflection`/`angular_deflection_deg`; 3MF and AMF keep one object per
-part and declare millimeters. `.step`/`.stp` and `.iges`/`.igs` keep exact
+part and declare millimeters. A 3MF carries each part's label as the object
+name, so a slicer lists the parts by name (FreeCAD's own writer leaves the name
+out; the addon adds it to the file after the export, with nothing else
+changed). `.step`/`.stp` and `.iges`/`.igs` keep exact
 geometry, names and colors. `.glb`/`.gltf` write a tessellated scene in
 meters; `.gltf` also writes a separate `.bin` buffer next to it, named in the
 reply's `companion_file`. `.brep`/`.brp` write the exact shape. `.FCStd`
@@ -620,10 +624,13 @@ Check a print layout before `export_document` writes it: every listed part
 lies inside the plate and no two parts overlap. Lay each part flat on the
 plate with its `Placement` first (the plate is x 0 to `bed_x`, y 0 to `bed_y`,
 z up from 0, unless you move its corner with `bed_origin_x` and `bed_origin_y`), then call this. It does no meshing, so it is fast.
+Solids and meshes both work: a `Mesh::Feature`, a link to one, or a container
+holding one is placed by its global bounding box, with its `Placement` counted
+once.
 
 - `doc_name` (string, required)
 - `object_names` (array of strings, optional): default the visible top-level
-  solids.
+  solids and meshes.
 - `bed_x`, `bed_y` (numbers, required, up to 10000 mm): plate width and depth.
 - `bed_z` (number, optional, up to 10000 mm): build height; default not
   checked.
@@ -639,9 +646,13 @@ differs), its size (tight bounding box), its free margin to the plate edges
 to the build height when `bed_z` is given; the side that sits on the plate is
 not counted; a sign shows only when the part is outside), and which parts it
 overlaps. Space the parts apart before calling it: overlapping complex parts,
-such as threads, make the intersection slow. Overlap is the volume
-of the parts' solid intersection, so a part sitting in another part's cavity
-does not overlap it. `printable` is true only when at least one part was
+such as threads, make the intersection slow. Overlap of two solids is the volume
+of their solid intersection, so a part sitting in another part's cavity
+does not overlap it. A mesh is never converted: a pair with a mesh overlaps
+when their bounding boxes share volume, so a part nested in a mesh's box counts
+as overlapping, and the reply says so for that part (`overlap_checked_by` is
+`bounding box`). The size is the tight box: for a swept solid such as a thread
+it is exact, where `Shape.BoundBox` can be much wider. `printable` is true only when at least one part was
 checked, every part is inside the plate and none overlaps; it is false, not
 vacuously true, when nothing was checked. Move parts with `update_object` on
 `Placement` until it is true. Invalid shapes usually come from a failed

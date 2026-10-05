@@ -23,11 +23,12 @@ Print each part in the pose it prints in. Lay every part flat on the plate with 
 
 Call check_printability before every export for a printer, with bed_x and bed_y in mm (bed_z for the build height).
 
-It reports per part its size, its free margin to each plate edge, and which parts it overlaps. It does no meshing, so it is fast.
+It reports per part its tight size, its free margin to each plate edge, and which parts it overlaps. It does no meshing, so it is fast. It checks solids and meshes.
 
 - printable is true only when something was checked, every part lies inside the plate and no two parts overlap.
 - Space the parts apart before you call it. Overlapping complex parts, such as threads, make the intersection slow.
-- Overlap is the volume of the parts' shared solid. A part resting in another part's cavity does not overlap it.
+- Overlap of two solids is the volume of their shared solid. A solid resting in another solid's cavity does not overlap it.
+- A mesh is checked by its bounding box, so a part nested in a mesh's box counts as overlapping. Space mesh parts apart. Read mesh.md for working on meshes.
 - When it reports a part outside the plate or an overlap, move the part with update_object on Placement, then call it again.
 - Tell the user the size of each part and whether the layout fits.
 
@@ -41,7 +42,7 @@ It reports per part its size, its free margin to each plate edge, and which part
 ## Export
 
 - Call export_document with a .stl or .3mf path.
-- 3MF keeps one object per part and declares mm. Slicers prefer it.
+- 3MF keeps one object per part, named after its label, and declares mm. Slicers prefer it.
 - For one file per part, pass per_object true, object_names, format stl (or step) and a folder as path. Each file is named after its object's label and the reply lists every file.
 - quality is coarse for previews, standard for FDM, fine for resin and small curved parts. linear_deflection and angular_deflection_deg override it.
 - Pass overwrite true when the file exists.

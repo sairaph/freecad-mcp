@@ -154,14 +154,32 @@ def _center_of_mass_dict(center) -> dict:
     }
 
 
-def _center_of_mass(shape) -> dict | None:
+def _solid_volumes(shape, face_count: int) -> list[float] | None:
+    """The volume of each solid of a compound made only of solids, else None.
+
+    A compound's Volume is the sum of its solids' volumes, and each volume is
+    an integral that costs about 50 ms on a threaded bolt: summing the solids
+    (which the centre of mass needs anyway) avoids integrating every solid a
+    second time through ``shape.Volume``. A compound that also holds free
+    faces or shells, or solids that share faces, keeps ``shape.Volume``.
+    """
+    if getattr(shape, "ShapeType", "") not in ("Compound", "CompSolid"):
+        return None
+    solids = list(shape.Solids)
+    if not solids or face_count != sum(len(solid.Faces) for solid in solids):
+        return None
+    return [solid.Volume for solid in solids]
+
+
+def _center_of_mass(shape, volumes: list[float] | None = None) -> dict | None:
     """CenterOfMass as {"x", "y", "z"}, or None when the shape has none.
 
     Solid, Shell, Face, Wire and Edge report it directly. Anything else
     (a compound from a boolean operation, a CompSolid, ...) gets a
-    volume-weighted average over Shape.Solids; a shape with no solids
-    (a Vertex, an empty compound) has none. Each coordinate goes through
-    finite_or_none, as a degenerate solid's centroid can be NaN.
+    volume-weighted average over Shape.Solids (``volumes``, when given, are
+    their volumes already); a shape with no solids (a Vertex, an empty
+    compound) has none. Each coordinate goes through finite_or_none, as a
+    degenerate solid's centroid can be NaN.
     """
     if getattr(shape, "ShapeType", "") in _CENTER_OF_MASS_DIRECT_TYPES:
         return _center_of_mass_dict(shape.CenterOfMass)
@@ -173,8 +191,8 @@ def _center_of_mass(shape) -> dict | None:
 
     total_volume = 0.0
     sum_x = sum_y = sum_z = 0.0
-    for solid in solids:
-        volume = solid.Volume
+    for index, solid in enumerate(solids):
+        volume = volumes[index] if volumes is not None else solid.Volume
         if volume <= 0:
             continue
         center = solid.CenterOfMass
@@ -195,22 +213,24 @@ def serialize_shape(shape):
     if shape is None:
         return None
     try:
+        face_count = len(shape.Faces)
+        volumes = _solid_volumes(shape, face_count)
         result = {
-            "Volume": finite_or_none(shape.Volume),
+            "Volume": finite_or_none(sum(volumes) if volumes is not None else shape.Volume),
             "Area": finite_or_none(shape.Area),
             "VertexCount": len(shape.Vertexes),
             "EdgeCount": len(shape.Edges),
-            "FaceCount": len(shape.Faces),
+            "FaceCount": face_count,
             # A fused result can be a Compound of several solids.
             "SolidCount": len(shape.Solids),
-            # The fast box: it can be loose on curved parts; check_printability
-            # reports the tight one.
-            "BoundBox": bound_box_list(shape.BoundBox),
+            # The tight box, as check_printability reports: shape.BoundBox is
+            # loose on curved and swept parts (a thread's came out 30 % wide).
+            "BoundBox": bound_box_list(tight_bound_box(shape)),
         }
     except Exception as e:
         return {"error": f"invalid shape: {str(e)}"}
     try:
-        center = _center_of_mass(shape)
+        center = _center_of_mass(shape, volumes)
     except Exception:
         center = None
     if center is not None:

@@ -78,6 +78,75 @@ def test_good_shape_serializes():
     assert result["SolidCount"] == 1
 
 
+class _SweptShape(_GoodShape):
+    """A swept thread: BoundBox is the loose box, optimalBoundingBox the exact one."""
+
+    BoundBox = types.SimpleNamespace(XMin=-26.0, YMin=-26.0, ZMin=-0.8, XMax=26.0, YMax=26.0, ZMax=12.8)
+    calls: list = []
+
+    def optimalBoundingBox(self, use_triangulation, use_shape_tolerance):
+        self.calls.append((use_triangulation, use_shape_tolerance))
+        return types.SimpleNamespace(
+            XMin=-20.0, YMin=-20.0, ZMin=-0.8, XMax=20.0, YMax=20.0, ZMax=12.8, isValid=lambda: True
+        )
+
+
+def test_the_bound_box_is_the_tight_one_without_triangulation():
+    result = serialize.serialize_shape(_SweptShape())
+    assert result["BoundBox"] == [-20.0, -20.0, -0.8, 20.0, 20.0, 12.8]
+    assert _SweptShape.calls == [(False, False)]
+
+
+def test_a_shape_the_tight_box_cannot_handle_keeps_its_plain_box():
+    # _GoodShape has no optimalBoundingBox, as for a shape OpenCascade cannot measure.
+    assert serialize.serialize_shape(_GoodShape())["BoundBox"] == [0.0, 0.0, 0.0, 1.0, 2.0, 3.0]
+
+
+class _CountedSolid:
+    """A solid whose Volume is an integral: the calls are counted."""
+
+    def __init__(self, volume, x, faces=8):
+        self._volume, self.CenterOfMass, self.Faces = volume, _StubVector(x, 0.0, 0.0), [object()] * faces
+        self.volume_calls = 0
+
+    @property
+    def Volume(self):
+        self.volume_calls += 1
+        return self._volume
+
+
+class _Compound:
+    ShapeType = "Compound"
+    Area = 10.0
+    Vertexes, Edges = [object()] * 4, [object()] * 6
+    BoundBox = _StubBoundBox()
+
+    def __init__(self, solids, free_faces=0, shared=0):
+        self.Solids = solids
+        self.Faces = [object()] * (sum(len(s.Faces) for s in solids) + free_faces - shared)
+        self.compound_volume_calls = 0
+
+    @property
+    def Volume(self):
+        self.compound_volume_calls += 1
+        return sum(s._volume for s in self.Solids)
+
+
+def test_a_compound_of_solids_integrates_each_solid_once_for_volume_and_centre():
+    solids = [_CountedSolid(2.0, 0.0), _CountedSolid(6.0, 4.0)]
+    compound = _Compound(solids)
+    result = serialize.serialize_shape(compound)
+    assert result["Volume"] == 8.0 and result["CenterOfMass"]["x"] == 3.0
+    assert [s.volume_calls for s in solids] == [1, 1] and compound.compound_volume_calls == 0
+
+
+def test_a_compound_with_free_faces_or_shared_faces_keeps_the_shapes_own_volume():
+    for extra in ({"free_faces": 2}, {"shared": 2}):
+        compound = _Compound([_CountedSolid(2.0, 0.0), _CountedSolid(6.0, 4.0)], **extra)
+        assert serialize.serialize_shape(compound)["Volume"] == 8.0
+        assert compound.compound_volume_calls == 1
+
+
 def test_broken_shape_returns_error_dict_instead_of_raising():
     result = serialize.serialize_shape(_BrokenShape())
     assert "error" in result
