@@ -4,6 +4,7 @@
 # quantity helpers) needs nothing of FreeCAD beyond its name.
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -222,6 +223,30 @@ def quantity_values(obj: FreeCAD.DocumentObject, names: Any) -> dict[str, str]:
         if isinstance(value, quantity):
             out[name] = quantity_text(value)
     return out
+
+
+def adjusted_values(obj: FreeCAD.DocumentObject, given: Any) -> list[dict[str, float | str]]:
+    """The length and angle properties among ``given`` (name -> value) that were
+    set from a number and now hold another one: FreeCAD clamped or replaced it.
+    Each row is ``{"name", "given", "stored"}`` in mm or degrees. Expressions and
+    strings with units are not compared."""
+    quantity = quantity_type()
+    rows = []
+    if quantity is None:
+        return rows
+    for name, value in given.items():
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or name not in obj.PropertiesList:
+            continue
+        try:
+            stored = getattr(obj, name)
+            if not isinstance(stored, quantity) or str(stored.Unit.Type) not in ("Length", "Angle"):
+                continue
+            now = float(stored.Value)
+        except Exception:
+            continue
+        if not math.isclose(float(value), now, rel_tol=1e-6, abs_tol=1e-9):
+            rows.append({"name": name, "given": value, "stored": now})
+    return rows
 
 
 def _map_text(value: Any) -> Any:

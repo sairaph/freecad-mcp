@@ -13,6 +13,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/sairaph/freecad-mcp/internal/hidewin"
 )
 
 // Result is the outcome of one headless run.
@@ -277,7 +279,7 @@ func RunScript(ctx context.Context, s Script, timeout float64, command []string)
 	runCtx, cancel := context.WithTimeout(ctx, limit)
 	defer cancel()
 	args := append(append([]string{}, command[1:]...), "-c", bootstrap(script))
-	cmd := exec.CommandContext(runCtx, command[0], args...)
+	cmd := hidewin.Hide(exec.CommandContext(runCtx, command[0], args...))
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	// A helper that inherited the pipes must not keep Wait from returning.

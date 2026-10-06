@@ -20,6 +20,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/sairaph/freecad-mcp/internal/headless"
+	"github.com/sairaph/freecad-mcp/internal/hidewin"
 )
 
 // Target is one FreeCAD user data directory the addon can be installed into.
@@ -196,7 +197,7 @@ func askFreeCADUncached(ctx context.Context, command []string) string {
 	// carry a non-ASCII profile directory intact.
 	code := "import FreeCAD; print('" + userDataMarker + "' + FreeCAD.getUserAppDataDir().encode('utf-8').hex())"
 	args := append(append([]string{}, command[1:]...), "-c", code)
-	cmd := exec.CommandContext(ctx, command[0], args...)
+	cmd := hidewin.Hide(exec.CommandContext(ctx, command[0], args...))
 	cmd.WaitDelay = 2 * time.Second
 	out, err := cmd.Output()
 	if err != nil {

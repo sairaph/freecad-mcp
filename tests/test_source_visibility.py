@@ -1,4 +1,4 @@
-"""The source of a fillet, chamfer, extrusion, revolution or thickness is hidden, as FreeCAD's own command does."""
+"""The source of a fillet, chamfer, extrusion, revolution, thickness, loft or sweep is hidden, as FreeCAD's own command does."""
 
 import importlib.util
 import sys
@@ -48,7 +48,7 @@ def test_thickness_hides_the_object_of_its_face_link(hide_sources) -> None:
     assert source.ViewObject.Visibility is False
 
 
-@pytest.mark.parametrize("type_id", ["Part::Mirroring", "Part::Offset", "Part::Loft", "Part::Sweep", "Part::RuledSurface", "Part::Cut"])
+@pytest.mark.parametrize("type_id", ["Part::Mirroring", "Part::Offset", "Part::RuledSurface", "Part::Cut"])
 def test_types_whose_command_leaves_the_source_shown_are_left_alone(hide_sources, type_id: str) -> None:
     source = shape_object("Box")
     assert hide_sources(feature(type_id, Base=source, Source=source), None) == []
@@ -70,3 +70,27 @@ def test_an_update_hides_the_source_only_when_it_changed_the_source_link(hide_so
 def test_no_view_or_no_source_hides_nothing(hide_sources) -> None:
     assert hide_sources(feature("Part::Fillet", Base=types.SimpleNamespace(Name="X", ViewObject=None)), None) == []
     assert hide_sources(feature("Part::Fillet", Base=None), None) == []
+
+
+def test_a_loft_hides_every_section(hide_sources) -> None:
+    sections = [shape_object("Circle"), shape_object("Ellipse")]
+    assert hide_sources(feature("Part::Loft", Sections=sections), None) == ["Circle", "Ellipse"]
+    assert all(section.ViewObject.Visibility is False for section in sections)
+
+
+def test_a_sweep_hides_its_profiles_and_its_spine(hide_sources) -> None:
+    profile, path = shape_object("Profile"), shape_object("Path")
+    assert hide_sources(feature("Part::Sweep", Sections=[profile], Spine=(path, ["Edge1"])), None) == ["Profile", "Path"]
+    assert profile.ViewObject.Visibility is False and path.ViewObject.Visibility is False
+
+
+def test_a_sweep_spine_given_as_a_bare_object_is_hidden(hide_sources) -> None:
+    path = shape_object("Path")
+    assert hide_sources(feature("Part::Sweep", Sections=[], Spine=path), None) == ["Path"]
+
+
+def test_an_update_of_the_spine_leaves_the_sections_alone(hide_sources) -> None:
+    profile, path = shape_object("Profile"), shape_object("Path")
+    sweep = feature("Part::Sweep", Sections=[profile], Spine=(path, ["Edge1"]))
+    assert hide_sources(sweep, {"Spine": ["Path", ["Edge1"]]}) == ["Path"]
+    assert profile.ViewObject.Visibility is True

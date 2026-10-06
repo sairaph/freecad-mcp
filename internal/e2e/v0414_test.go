@@ -21,10 +21,10 @@ func TestCreateAndUpdateReportShapeWarningAndHiddenInputs(t *testing.T) {
 		return map[string]any{"Base": map[string]any{"x": x, "y": 0, "z": 0}}
 	}
 
-	must(t, create("Block", "Part::Box", map[string]any{"Length": 40, "Width": 20, "Height": 12}), "Shape: 1 solid, 40 x 20 x 12 mm, volume 9600.0 mm^3")
+	must(t, create("Block", "Part::Box", map[string]any{"Length": 40, "Width": 20, "Height": 12}), "Shape: 1 solid, 40 x 20 x 12 mm at x 0 to 40, y 0 to 20, z 0 to 12, volume 9600.0 mm^3")
 	must(t, create("Hole", "Part::Cylinder", map[string]any{"Radius": 3, "Height": 12, "Placement": at(10)}))
 	r := create("Clip", "Part::Cut", map[string]any{"Base": "Block", "Tool": "Hole"})
-	must(t, r, "Shape: 1 solid, 40 x 20 x 12 mm, volume 9", "Hidden: Block, Hole (inputs of Clip).")
+	must(t, r, "Shape: 1 solid, 40 x 20 x 12 mm at ", "volume 9", "Hidden: Block, Hole (inputs of Clip).")
 	if strings.Contains(r.text, "Warning:") {
 		t.Fatalf("a cut with a solid warned:\n%s", r.text)
 	}

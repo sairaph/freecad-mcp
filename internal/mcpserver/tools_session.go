@@ -18,8 +18,11 @@ var sessionToolNames = []string{"release_session", "close_freecad"}
 
 // sessionExplanation ends get_rpc_status's session sentence while the lock is
 // on, naming the two tools that manage it.
-const sessionExplanation = "With remote access on, one agent at a time holds FreeCAD; only get_rpc_status works " +
+const sessionExplanation = "Sharing is on: one agent at a time holds FreeCAD. Only get_rpc_status works " +
 	"for the others until it frees. release_session frees your own session; close_freecad quits FreeCAD."
+
+// sessionOffText is get_rpc_status's session sentence while the lock is off.
+const sessionOffText = "Sharing is off: agents on this computer share FreeCAD without a lock."
 
 type releaseSessionFront struct {
 	Released    bool   `yaml:"released"`
@@ -152,7 +155,7 @@ type sessionFields struct {
 func sessionFront(ctx context.Context, status map[string]any) (sessionFields, string) {
 	session, _ := status["session"].(map[string]any)
 	if !boolField(session, "enabled") {
-		return sessionFields{SessionLock: "off"}, ""
+		return sessionFields{SessionLock: "off"}, sessionOffText
 	}
 
 	holder := str(session, "holder")

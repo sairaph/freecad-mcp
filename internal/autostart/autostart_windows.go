@@ -24,6 +24,7 @@ import (
 	"unicode/utf16"
 
 	"github.com/sairaph/freecad-mcp/internal/domain"
+	"github.com/sairaph/freecad-mcp/internal/hidewin"
 	"github.com/sairaph/freecad-mcp/internal/listenerapi"
 )
 
@@ -185,7 +186,7 @@ func currentUserID() (string, error) {
 // combined output when it fails, so callers never have to parse localised
 // prose to explain a failure.
 func runSchtasks(args ...string) error {
-	out, err := exec.Command("schtasks", args...).CombinedOutput()
+	out, err := hidewin.Hide(exec.Command("schtasks", args...)).CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("schtasks %s: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(string(out)))
 	}
@@ -196,7 +197,7 @@ func runSchtasks(args ...string) error {
 // /query's exit code alone: 0 when the task is found, non-zero otherwise,
 // regardless of the Windows display language.
 func taskRegistered() bool {
-	err := exec.Command("schtasks", "/query", "/tn", WindowsTaskName, "/fo", "CSV", "/nh").Run()
+	err := hidewin.Hide(exec.Command("schtasks", "/query", "/tn", WindowsTaskName, "/fo", "CSV", "/nh")).Run()
 	return err == nil
 }
 

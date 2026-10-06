@@ -16,6 +16,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/sairaph/freecad-mcp/internal/hidewin"
 )
 
 // TailLines is how many of the last output lines a job reports.
@@ -133,7 +135,7 @@ func (m *Jobs) StartScript(ctx context.Context, s Script, timeout float64, comma
 	}
 	runCtx, stop := context.WithTimeout(context.Background(), time.Duration(timeout*float64(time.Second)))
 	args := append(append([]string{}, command[1:]...), "-c", bootstrap(script))
-	cmd := exec.CommandContext(runCtx, command[0], args...)
+	cmd := hidewin.Hide(exec.CommandContext(runCtx, command[0], args...))
 	cmd.Stdout, cmd.Stderr = out, out
 	cmd.WaitDelay = 2 * time.Second
 	kill, err := startTree(cmd)

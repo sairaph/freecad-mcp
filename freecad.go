@@ -24,6 +24,7 @@ import (
 	"github.com/sairaph/freecad-mcp/internal/addoninstall"
 	"github.com/sairaph/freecad-mcp/internal/domain"
 	"github.com/sairaph/freecad-mcp/internal/headless"
+	"github.com/sairaph/freecad-mcp/internal/hidewin"
 )
 
 // serverSettings reads the MCP server's settings: the environment first,
@@ -381,7 +382,7 @@ func refreshAddon(ctx context.Context, w io.Writer, targets []addoninstall.Targe
 // runNewBinaryAddonRefresh runs `install-addon --refresh` with the binary an
 // update just installed, since this process still holds the old addon.
 func runNewBinaryAddonRefresh(ctx context.Context, exe string) int {
-	cmd := exec.CommandContext(ctx, exe, "install-addon", "--refresh")
+	cmd := hidewin.Hide(exec.CommandContext(ctx, exe, "install-addon", "--refresh"))
 	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
 	if err := cmd.Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "  Could not update the FreeCAD addon (%v); run `%s install-addon`.\n", err, domain.BinaryName)

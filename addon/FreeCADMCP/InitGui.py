@@ -42,6 +42,15 @@ class FreeCADMCPAddonWorkbench(Workbench):
 
 Gui.addWorkbench(FreeCADMCPAddonWorkbench())
 
+# FreeCAD's FEM tools hide their Gmsh and CalculiX windows in a way Windows
+# Terminal ignores; children started without console flags get none.
+try:
+    from rpc_server import console_windows as _console_windows
+
+    _console_windows.install()
+except Exception as _console_error:
+    FreeCAD.Console.PrintLog(f"[MCP] Could not hide child console windows: {_console_error}\n")
+
 # Every document that opens without GUI data (a file saved by freecadcmd) is
 # restored, however it was opened. Registered here, when the GUI part loads, so
 # the file FreeCAD opens from its command line is covered too.

@@ -91,12 +91,12 @@ func TestWedgeAndPrismRecipes(t *testing.T) {
 	const doc = "E2EWedge"
 	newDoc(t, cs, doc)
 	wedge := map[string]any{"Xmin": 0, "Xmax": 30, "Ymin": 0, "Ymax": 12, "Zmin": 0, "Zmax": 4, "X2min": 0, "X2max": 0, "Z2min": 0, "Z2max": 4}
-	must(t, v0415Create(t, cs, doc, "Gusset", "Part::Wedge", wedge), "Shape: 1 solid, 30 x 12 x 4 mm, volume 720.0 mm^3")
+	must(t, v0415Create(t, cs, doc, "Gusset", "Part::Wedge", wedge), "Shape: 1 solid, 30 x 12 x 4 mm at x 0 to 30, y 0 to 12, z 0 to 4, volume 720.0 mm^3")
 	stood := map[string]any{"Placement": map[string]any{"Base": map[string]any{"x": 0, "y": 4, "z": 0}, "Rotation": map[string]any{"Axis": map[string]any{"x": 1, "y": 0, "z": 0}, "Angle": 90}}}
 	for k, v := range wedge {
 		stood[k] = v
 	}
-	must(t, v0415Create(t, cs, doc, "Stood", "Part::Wedge", stood), "Shape: 1 solid, 30 x 4 x 12 mm, volume 720.0 mm^3")
+	must(t, v0415Create(t, cs, doc, "Stood", "Part::Wedge", stood), "Shape: 1 solid, 30 x 4 x 12 mm at ", "volume 720.0 mm^3")
 	// The box and the volume cannot tell a triangle in xy from one in xz: the vertices do.
 	must(t, call(t, cs, "execute_code", map[string]any{"include_screenshot": false, "code": "d = FreeCAD.getDocument('" + doc + "')\n" +
 		"for n in ('Gusset', 'Stood'):\n    print(n, sorted((round(v.X, 2) + 0.0, round(v.Y, 2) + 0.0, round(v.Z, 2) + 0.0) for v in d.getObject(n).Shape.Vertexes))"}),

@@ -9,6 +9,7 @@ Model holes, fits, threads and clips for the material the part prints in. Read i
 Print each part in the pose it prints in. Lay every part flat on the plate with its Placement: the face that sits on the plate at z 0, the part inside x 0 to the plate width and y 0 to the plate depth, with a few mm between parts.
 
 - Move the top object of each part, the one check_printability lists (the last Cut or Fillet), not its inputs.
+- A Part::Fillet or Part::Chamfer adds its Placement to its Base's. Keep the Base at the origin and move the Fillet, or move the Base and leave the Fillet's Placement at zero. Check with the span in the reply.
 - A lid or any part with recesses: put the face whose recesses would need bridges facing up, so countersinks and counterbores open upward.
 - A large pocket facing the plate (a washer pocket under a base) needs slicer supports or a different pose. Prefer the pose where it faces up, or split the part. A sacrificial layer only works for small bridges.
 - A part with a cosmetic face puts that face up, unless it is the flat one.

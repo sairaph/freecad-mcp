@@ -26,9 +26,9 @@ from rpc_server.empty_results import empty_result
 from rpc_server.fem_mesh import changes_meshing, generate_mesh, is_gmsh, mesh_info
 from rpc_server.fem_loads import load_info, material_info
 from rpc_server import partdesign
-from rpc_server.property_mapper import FILLET_TYPES, Object, fillet_edges_text, quantity_values, reject_app_link, set_object_property
+from rpc_server.property_mapper import FILLET_TYPES, Object, adjusted_values, fillet_edges_text, quantity_values, reject_app_link, set_object_property
 from rpc_server.object_validation import failed_names, newly_failed_report, object_validity_error, stale_dependents
-from rpc_server.serialize import object_shape_summary
+from rpc_server.serialize import object_shape_span, object_shape_summary
 from rpc_server.shape_changes import changed_shapes, remember_summaries, snapshot
 from rpc_server.source_visibility import hide_sources, newly_hidden, visibility_snapshot
 from rpc_server.transactions import active_document, transaction
@@ -505,6 +505,10 @@ def _shape_fields(obj: Any) -> dict[str, Any]:
     if summary.get("null") and hasattr(obj, "Group") and not obj.Group:
         return {}
     fields: dict[str, Any] = {"shape": summary}
+    span = _reading("where the shape lies", lambda: object_shape_span(obj), None) if summary.get("size") else None
+    if span:
+        # Kept out of the remembered summary: shape_changes compares those.
+        fields["shape"] = {**summary, "span": span}
     found = empty_result(obj, summary.get("volume"))
     if found is not None:
         fields["warning"] = found[0]
@@ -638,6 +642,7 @@ def create_object_gui(doc_name: str, obj: Object):
             shown = shown_before(doc)
             shapes_before = snapshot(doc)
             requested = list(obj.properties)
+            given = dict(obj.properties)
             plan = partdesign.Plan()
             try:
                 if obj.type == "Fem::FemMeshGmsh":
@@ -656,6 +661,7 @@ def create_object_gui(doc_name: str, obj: Object):
             doc.recompute()
             problem = object_validity_error(created)
             quantities = _reading("the quantities", lambda: quantity_values(created, requested), {})
+            adjusted = _reading("the adjusted values", lambda: adjusted_values(created, given), [])
             load = _reading("the load", lambda: load_info(created) or material_info(created), None)
             extra = _reading("the name and placement", lambda: _name_and_placement_fields(created, requested), {})
             if _reading("the mesh type", lambda: is_gmsh(created), False):
@@ -694,6 +700,8 @@ def create_object_gui(doc_name: str, obj: Object):
                 **(collateral or _stale_fields(created)),
             }
         reply = {"success": True, "object_name": created.Name, **tx.reply_fields(), **extra, **collateral}
+        if adjusted:
+            reply["adjusted"] = adjusted
         if quantities:
             reply["quantities"] = quantities
         if load is not None:
@@ -762,6 +770,7 @@ def edit_object_gui(doc_name: str, obj: Object):
                 doc.recompute()
                 problem = object_validity_error(obj_ins)
                 quantities = _reading("the quantities", lambda: quantity_values(obj_ins, obj.properties), {})
+                adjusted = _reading("the adjusted values", lambda: adjusted_values(obj_ins, obj.properties), [])
                 load = _reading("the load", lambda: load_info(obj_ins) or material_info(obj_ins), None)
                 extra = _reading("the name and placement", lambda: _name_and_placement_fields(obj_ins, list(obj.properties)), {})
                 extra.update(_partdesign_fields(obj_ins, plan))
@@ -801,6 +810,8 @@ def edit_object_gui(doc_name: str, obj: Object):
             }
         FreeCAD.Console.PrintMessage(f"Object '{obj_ins.Name}' updated via RPC.\n")
         reply = {"success": True, "object_name": obj_ins.Name, **tx.reply_fields(), **extra, **collateral}
+        if adjusted:
+            reply["adjusted"] = adjusted
         if quantities:
             reply["quantities"] = quantities
         if load is not None:
