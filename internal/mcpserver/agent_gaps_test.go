@@ -286,3 +286,64 @@ func TestRecomputeListsEmptyAndNoOpResults(t *testing.T) {
 		}
 	}
 }
+
+func TestPrintabilityAsksForBedZWhenItIsMissing(t *testing.T) {
+	fc := addon(t, map[string]xmlrpctest.Handler{
+		"check_printability": func([]any) (any, error) {
+			return map[string]any{"success": true, "printable": true, "overlaps": []any{}, "not_checked": []any{},
+				"objects": []any{map[string]any{"name": "A", "label": "A", "issues": []any{}, "size": []any{10.0, 10.0, 5.0}}}}, nil
+		},
+	})
+	cs := session(t, settingsFor(fc))
+	text := replyText(call(t, cs, "check_printability", map[string]any{"doc_name": "D", "bed_x": 220, "bed_y": 220}))
+	if !strings.Contains(text, "Height not checked: pass bed_z with the printer's build height.") {
+		t.Errorf("reply = %s", text)
+	}
+	text = replyText(call(t, cs, "check_printability", map[string]any{"doc_name": "D", "bed_x": 220, "bed_y": 220, "bed_z": 250}))
+	if strings.Contains(text, "Height not checked") {
+		t.Errorf("reply with bed_z = %s", text)
+	}
+}
+
+func TestRecomputeNamesTheFailedObjectADependentWaitsFor(t *testing.T) {
+	fc := addon(t, map[string]xmlrpctest.Handler{
+		"recompute_document": func([]any) (any, error) {
+			return map[string]any{"success": true, "document": "D", "recomputed": int64(2), "object_count": int64(3),
+				"invalid_count": int64(2), "invalid_truncated": false, "touched_count": int64(1), "touched_truncated": false,
+				"touched_objects": []any{"Final"}, "empty_results": []any{}, "empty_count": int64(0), "empty_truncated": false,
+				"invalid_objects": []any{
+					map[string]any{"name": "StandFillet", "type": "Part::Fillet", "status": "NCollection_IndexedMap::FindKey. An edge it rounds no longer exists in Stand after the change. Call list_subelements on Stand and set Edges again.", "waits_for": ""},
+					map[string]any{"name": "Final", "type": "Part::Cut", "status": "waits for StandFillet, which failed.", "waits_for": "StandFillet"},
+				}}, nil
+		},
+	})
+	text := replyText(call(t, session(t, settingsFor(fc)), "recompute_document", map[string]any{"doc_name": "D", "include_screenshot": false}))
+	for _, want := range []string{"An edge it rounds no longer exists in Stand after the change.",
+		`Final (Part::Cut): waits for StandFillet, which failed. Call update_object with {"doc_name": "D", "obj_name": "StandFillet"`} {
+		if !strings.Contains(text, want) {
+			t.Errorf("reply lacks %q:\n%s", want, text)
+		}
+	}
+}
+
+func TestListSubelementsMarksSmoothEdgesAndSeams(t *testing.T) {
+	fc := addon(t, map[string]xmlrpctest.Handler{
+		"list_subelements": func([]any) (any, error) {
+			return map[string]any{"success": true, "edges": []any{
+				map[string]any{"name": "Edge1", "curve": "line", "length": 10.0, "start": []any{0.0, 0.0, 0.0}, "end": []any{0.0, 0.0, 10.0}, "along": "z"},
+				map[string]any{"name": "Edge2", "curve": "line", "length": 10.0, "start": []any{3.0, 0.0, 0.0}, "end": []any{3.0, 0.0, 10.0}, "along": "z", "smooth": true},
+				map[string]any{"name": "Edge3", "curve": "line", "length": 10.0, "start": []any{2.0, 0.0, 0.0}, "end": []any{2.0, 0.0, 10.0}, "along": "z", "smooth": true, "seam": true},
+			}}, nil
+		},
+	})
+	text := replyText(call(t, session(t, settingsFor(fc)), "list_subelements", map[string]any{"doc_name": "D", "obj_name": "Box", "kind": "edges"}))
+	for _, want := range []string{"| Edge2 | line | 10 | from (3, 0, 0) to (3, 0, 10), along z, smooth (its two faces meet without a corner): never fillet or chamfer it |",
+		"| Edge3 | line | 10 | from (2, 0, 0) to (2, 0, 10), along z, smooth (a seam: the face meets itself): never fillet or chamfer it |"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("reply lacks %q:\n%s", want, text)
+		}
+	}
+	if strings.Count(text, "smooth") != 2 {
+		t.Errorf("a plain edge is marked smooth:\n%s", text)
+	}
+}

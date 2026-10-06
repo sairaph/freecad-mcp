@@ -54,7 +54,7 @@ Applies to obj_properties in create_object and update_object.
 
 {"Placement": {"Base": {"x": 10, "y": 0, "z": 0}, "Rotation": {"Axis": {"x": 0, "y": 0, "z": 1}, "Angle": 45}}}
 
-- Angle is in degrees.
+- Angle is in degrees and follows the right-hand rule about Axis: about x, a positive angle turns +z toward -y; about y, +z toward +x; about z, +x toward +y. A plate standing in the xz plane leans back (its top toward +y) with Axis (1, 0, 0) and a negative Angle.
 - Set Placement with update_object after create_object, or in the same create_object call.
 - Size comes from the object's own properties (Length, Radius, Height). There is no scale property.
 

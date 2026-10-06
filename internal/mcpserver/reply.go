@@ -477,7 +477,12 @@ func invalidObjectRow(obj map[string]any, docName string) string {
 	case !strings.HasSuffix(status, "."):
 		status += "."
 	}
-	return fmt.Sprintf("%s (%s): %s %s", name, str(obj, "type"), status, fixOrRemoveHint(docName, name))
+	fix := name
+	if waits := str(obj, "waits_for"); waits != "" {
+		// A dependent that only waits is fixed by fixing the object it waits for.
+		fix = waits
+	}
+	return fmt.Sprintf("%s (%s): %s %s", name, str(obj, "type"), status, fixOrRemoveHint(docName, fix))
 }
 
 // invalidObjectsBody renders every row of a mutating reply's invalid_objects

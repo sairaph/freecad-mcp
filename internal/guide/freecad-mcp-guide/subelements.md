@@ -14,7 +14,7 @@ A face row gives:
 - radius and axis for a cylinder or sphere
 - "on the bottom" when the face lies wholly at the shape's lowest z
 
-An edge row gives name, curve (line, circle, other), length, and radius and centre for a circle. It says "on the bottom" when it lies wholly at the shape's lowest z, and "degenerate" when it has no length (a pole of a rounded corner): never pick a degenerate edge.
+An edge row gives name, curve (line, circle, other), length, and radius and centre for a circle. It says "on the bottom" when it lies wholly at the shape's lowest z, and "degenerate" when it has no length (a pole of a rounded corner). It says "smooth" when its two faces meet without a corner (the boundary of a fillet) or it is a seam where one face meets itself (a cylinder's): never pick a degenerate or smooth edge to fillet or chamfer.
 
 ## Pick by geometry
 

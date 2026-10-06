@@ -29,7 +29,10 @@ Bind one part of a Placement the same way: {"Placement.Base.z": "=Params.thickne
 
 ## After a change
 
-- A Part::Fillet or Part::Chamfer lists edge numbers, and they can change when a dimension changes. After changing a parameter, call recompute_document: it lists each one that failed or holds no solid. Call list_subelements again before changing their edges.
+- Round each primitive before the booleans where the design allows: the edge names of a Part::Box or Part::Cylinder never change with its size, while a fused or cut shape renumbers its edges when a change alters its topology.
+- After changing a parameter, call recompute_document. It lists each object that failed. A Part::Fillet or Part::Chamfer that lost an edge says "An edge it rounds no longer exists in <Base> after the change": call list_subelements on the Base and set Edges again. "The radius is probably too large for these edges" means try a smaller radius or fewer edges, and leave out degenerate edges. "An edge in Edges cannot be rounded" means leave out edges marked degenerate or smooth in list_subelements.
+- An object that only waits on a failed one says "waits for <object>, which failed": fix that object, not this one.
+- A negative value in a cell is fine: "-20 deg" and "-5 mm" are stored as quantities.
 
 ## Undo
 

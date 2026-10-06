@@ -40,7 +40,84 @@ def object_status(obj: Any) -> str:
         return ""
 
 
-def object_validity_error(obj: Any, *, exclude_touched: bool = False) -> str | None:
+#: What FreeCAD says when a fillet or chamfer loses an edge it rounds (an Edges
+#: entry the Base no longer has) and when its size does not fit the edges
+#: (OpenCascade's "BRep_API: command not done"), or an edge it cannot round at all.
+_LOST_EDGE_MARKERS = ("Missing edge link", "NCollection_IndexedMap::FindKey")
+_ROUNDING_FAILED_MARKER = "BRep_API: command not done"
+_NO_SUITABLE_EDGES_MARKER = "There are no suitable edges"
+_ROUNDING_SIZE_WORD = {"Part::Fillet": "radius", "Part::Chamfer": "size"}
+
+
+_UNSET: Any = object()
+
+
+def _rounding_advice(obj: Any, reason: str) -> str:
+    """What to do about a failed fillet or chamfer, or "" for any other
+    object or message."""
+    word = _ROUNDING_SIZE_WORD.get(str(getattr(obj, "TypeId", "")))
+    if word is None:
+        return ""
+    base = str(getattr(getattr(obj, "Base", None), "Name", ""))
+    if base and any(marker in reason for marker in _LOST_EDGE_MARKERS):
+        return (
+            f"An edge it rounds no longer exists in {base} after the change. "
+            f"Call list_subelements on {base} and set Edges again."
+        )
+    if base and _NO_SUITABLE_EDGES_MARKER in reason:
+        return (
+            f"An edge in Edges cannot be rounded: call list_subelements on {base} and leave out "
+            "edges marked degenerate or smooth."
+        )
+    if _ROUNDING_FAILED_MARKER in reason:
+        return (
+            f"The {word} is probably too large for these edges: try a smaller {word} or fewer edges, "
+            "and leave out degenerate edges."
+        )
+    return ""
+
+
+def failed_dependency(obj: Any) -> str | None:
+    """The name of the nearest object ``obj`` depends on that failed, for an
+    object that is only Touched: FreeCAD skips the dependents of a failed
+    object and they say nothing else. None when ``obj`` failed itself, is not
+    Touched, or no dependency failed."""
+    states = {state.strip().casefold() for state in object_states(obj)}
+    if "touched" not in states or object_validity_error(obj, exclude_touched=True, explain=False) is not None:
+        return None
+    seen = {id(obj)}
+    level = [obj]
+    while level:
+        following = []
+        for current in level:
+            for dep in getattr(current, "OutList", None) or []:
+                if id(dep) in seen:
+                    continue
+                seen.add(id(dep))
+                if object_validity_error(dep, exclude_touched=True, explain=False) is not None:
+                    return str(getattr(dep, "Name", ""))
+                following.append(dep)
+        level = following
+    return None
+
+
+def failure_reason(obj: Any, waits_for: str | None = _UNSET) -> str:
+    """Why ``obj`` is flagged: FreeCAD's own status text, with what to do about
+    a failed fillet or chamfer after it, or, for an object that only waits on
+    a failed dependency, which one. ``waits_for`` is that dependency when the
+    caller has it already (the search is not repeated)."""
+    if waits_for is _UNSET:
+        waits_for = failed_dependency(obj)
+    if waits_for:
+        return f"waits for {waits_for}, which failed."
+    reason = object_status(obj)
+    advice = _rounding_advice(obj, reason)
+    if advice:
+        return f"{reason.rstrip('.')}. {advice}" if reason else advice
+    return reason
+
+
+def object_validity_error(obj: Any, *, exclude_touched: bool = False, explain: bool = True) -> str | None:
     """Return a diagnostic when ``obj`` is invalid, otherwise ``None``.
 
     Shape presence is deliberately not used as the discriminator. Containers,
@@ -54,6 +131,9 @@ def object_validity_error(obj: Any, *, exclude_touched: bool = False) -> str | N
     no recompute of its own before checking (a document just opened, or
     freshly loaded state before any change) passes ``exclude_touched=True``,
     since there a bare Touched only means "not recomputed yet", not broken.
+    ``explain`` False leaves FreeCAD's own status text as the reason, without
+    the advice and the dependency search that ``failure_reason`` adds (those
+    call this function on other objects).
     """
     name = str(getattr(obj, "Name", "<unknown>"))
     states = object_states(obj)
@@ -78,7 +158,7 @@ def object_validity_error(obj: Any, *, exclude_touched: bool = False) -> str | N
     if is_valid_result and not failed_states:
         return None
 
-    reason = object_status(obj)
+    reason = failure_reason(obj) if explain else object_status(obj)
 
     state = ", ".join(states) if states else "unknown"
 
@@ -90,21 +170,26 @@ def object_validity_error(obj: Any, *, exclude_touched: bool = False) -> str | N
     )
 
 
-def invalid_object_row(obj: Any) -> dict[str, Any]:
+def invalid_object_row(obj: Any, waits_for: str | None = _UNSET) -> dict[str, Any]:
     """Build one row for ``obj``.
 
-    ``{"name", "label", "type", "state": [str], "status": str}``, the shared
-    shape every mutating and document-listing reply's ``invalid_objects``
-    uses. Does not itself decide whether ``obj`` is invalid; call
+    ``{"name", "label", "type", "state": [str], "status": str, "waits_for": str}``
+    (``waits_for`` names the failed object a Touched ``obj`` depends on, else
+    ""), the shared shape every mutating and document-listing reply's
+    ``invalid_objects`` uses. Does not itself decide whether ``obj`` is
+    invalid; call
     ``object_validity_error`` (directly, or through ``invalid_objects_report``)
     for that.
     """
+    if waits_for is _UNSET:
+        waits_for = failed_dependency(obj)
     return {
         "name": str(getattr(obj, "Name", "")),
         "label": str(getattr(obj, "Label", "")),
         "type": str(getattr(obj, "TypeId", "")),
         "state": object_states(obj),
-        "status": object_status(obj),
+        "status": failure_reason(obj, waits_for),
+        "waits_for": waits_for or "",
     }
 
 
@@ -127,7 +212,7 @@ def invalid_objects_report(
     rows: list[dict[str, Any]] = []
     count = 0
     for obj in objects:
-        if object_validity_error(obj, exclude_touched=exclude_touched) is None:
+        if object_validity_error(obj, exclude_touched=exclude_touched, explain=False) is None:
             continue
         count += 1
         if len(rows) < limit:

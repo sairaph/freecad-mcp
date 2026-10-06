@@ -180,6 +180,10 @@ func (s *Server) checkPrintability(ctx context.Context, _ *mcp.CallToolRequest, 
 		}
 	}
 
+	if in.BedZ == nil && len(objects) > 0 {
+		body.WriteString("\n\nHeight not checked: pass bed_z with the printer's build height.")
+	}
+
 	front := printabilityFront{
 		Document:          in.DocName,
 		Printable:         printable,
