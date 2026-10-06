@@ -12,6 +12,7 @@ from rpc_server.empty_results import SOLID_INPUTS, empty_result
 from rpc_server.fem_mesh import is_gmsh, mesh_changed_since_meshing, meshed_shape
 from rpc_server.gui_task import resolve_timeout, run_on_gui
 from rpc_server.lookup import require_document
+from rpc_server.shape_changes import changed_shapes, snapshot
 from rpc_server.object_validation import (
     MAX_LISTED_OBJECTS,
     invalid_objects_report,
@@ -45,6 +46,7 @@ def recompute_document(doc_name: str, timeout: Any = None) -> dict[str, Any]:
         doc, error = require_document(doc_name)
         if error is not None:
             return error
+        shapes_before = snapshot(doc)
         recomputed = doc.recompute()
         objects = doc.Objects
         invalid = invalid_objects_report(objects)
@@ -91,6 +93,7 @@ def recompute_document(doc_name: str, timeout: Any = None) -> dict[str, Any]:
             "empty_count": empty_count,
             "empty_truncated": empty_count > len(empty_results),
             "stale_meshes": stale_meshes,
+            **changed_shapes(doc, shapes_before),
         }
 
     return run_on_gui(task, run_budget, "recompute_document", tool=TOOL_NAME)

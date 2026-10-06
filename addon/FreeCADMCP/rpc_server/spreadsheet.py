@@ -14,6 +14,7 @@ from rpc_server.errors import FREECAD_ERROR, INVALID_INPUT, NOT_FOUND, fail, too
 from rpc_server.gui_task import run_on_gui
 from rpc_server.lookup import require_document
 from rpc_server.object_validation import invalid_objects_report
+from rpc_server.shape_changes import changed_shapes, snapshot
 from rpc_server.serialize import serialize_value
 from rpc_server.transactions import active_document, transaction
 
@@ -533,6 +534,7 @@ def update_spreadsheet_cells(
         # GUI has focused (transactions.active_document docstring).
         updated: list[str] = []
         converted: dict[str, str] = {}
+        shapes_before = snapshot(doc)
         did_recompute = False
         with active_document(doc), transaction("update_spreadsheet_cells") as tx:
             failure: dict[str, Any] | None = None
@@ -615,6 +617,7 @@ def update_spreadsheet_cells(
             # applied): a bare Touched state then only means "not recomputed
             # yet", not broken (object_validity_error's exclude_touched).
             **invalid,
+            **changed_shapes(doc, shapes_before),
         }
         if invalid["invalid_objects"]:
             error_cells = _error_cell_addresses(sheet)

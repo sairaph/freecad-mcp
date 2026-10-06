@@ -23,6 +23,10 @@ Bind one part of a Placement the same way: {"Placement.Base.z": "=Params.thickne
 - Read cells back with get_spreadsheet_cells. Without cells it returns every non-empty cell.
 - To unbind, call update_object with the property set to "=".
 
+## Sketches
+
+- Sketch geometry cannot follow a cell: the tools set no dimensional constraints. For a PartDesign part, build it from PartDesign::AdditiveBox, AdditiveCylinder, SubtractiveCylinder and the other primitives, bind their Length, Radius, Height and Placement to cells, and bind a sketch's AttachmentOffset to move it. Read partdesign.md.
+
 ## Through cuts
 
 - Make the height of a through-cut tool exceed the driven thickness, for example "=Params.thickness + 2 mm", so the hole stays through when the thickness changes.

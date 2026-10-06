@@ -25,6 +25,7 @@ type importFileFront struct {
 	CreatedDocument bool   `yaml:"created_document"`
 	Format          string `yaml:"format"`
 	Importer        string `yaml:"importer"`
+	File            string `yaml:"file"`
 	ObjectCount     int    `yaml:"object_count"`
 	Transaction     string `yaml:"transaction,omitempty"`
 	StaleCount      int    `yaml:"stale_count,omitempty"`
@@ -89,18 +90,20 @@ func (s *Server) importFile(ctx context.Context, _ *mcp.CallToolRequest, in impo
 		CreatedDocument: createdDocument,
 		Format:          format,
 		Importer:        importer,
+		File:            in.Path,
 		ObjectCount:     objectCount,
 		Transaction:     transaction,
 		StaleCount:      intField(res, "stale_count"),
 	}
 
+	fileName := in.Path[strings.LastIndexAny(in.Path, `/\`)+1:]
 	var body strings.Builder
 	if createdDocument {
-		fmt.Fprintf(&body, "Imported '.%s' into new document '%s' (%d object(s) created via %s).\n",
-			format, doc, objectCount, importer)
+		fmt.Fprintf(&body, "Imported '%s' into new document '%s' (%d object(s) created via %s).\n",
+			fileName, doc, objectCount, importer)
 	} else {
-		fmt.Fprintf(&body, "Imported '.%s' into document '%s' (%d object(s) created via %s).\n",
-			format, doc, objectCount, importer)
+		fmt.Fprintf(&body, "Imported '%s' into document '%s' (%d object(s) created via %s).\n",
+			fileName, doc, objectCount, importer)
 	}
 	if rootObject != "" {
 		fmt.Fprintf(&body, "Root object: %s\n", rootObject)

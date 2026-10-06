@@ -242,7 +242,9 @@ Body: measured on FreeCAD 1.1, `Body.addObject` keeps it.
 `{"arc": {"center": [x, y], "radius": r, "start_angle": a, "end_angle": b}}`
 (degrees, counter-clockwise from the start to the end) and
 `{"rectangle": {"corner": [x, y], "size": [w, h]}}` (four lines with coincident
-corners), in mm in the sketch's own coordinates. Everything is checked before
+corners) and `{"slot": {"center1": [x, y], "center2": [x, y], "width": w}}` (two
+lines and two arcs with coincident ends, caps centred on the two points; equal
+centres and a width of 0 or less are refused), in mm in the sketch's own coordinates. Everything is checked before
 the sketch changes; the geometry of the sketch is replaced, with its
 constraints. The reply says how many: `Replaced the geometry and its 4 constraints.` Constraints cannot be set with this tool. The reply says
 `Sketch: 4 geometry elements, closed profile.` (`sketch`: `geometry_count`,
@@ -370,6 +372,24 @@ the call set with their resulting values and units. A fillet or chamfer reply
 lists its edges, and the reply names a source object it hid, as for
 `create_object`.
 
+### Shape changes
+
+`undo`, `redo`, `recompute_document`, `update_spreadsheet_cells` and
+`delete_object` list the shapes they changed: for each top-level object (one
+no other object's tree node claims, so a Body counts once and its features not
+at all) whose shape changed during the call, `Shapes now: <name>: <shape>` in
+the `Shape:` format of `create_object` (several objects are listed one per
+line; the JSON has `changed_shapes`, `changed_shapes_count` and
+`changed_shapes_truncated`, capped at 200 like the invalid rows). A call that
+rebuilt nothing says nothing. Detection reads one hash of each object's shape
+before and after (O(1) each, no volume or topology walk) and only the changed
+top-level objects get a summary. Measured on a document of 100 bored blocks
+and their compound (101 objects, 700 faces): taking the snapshot 1.9 ms, a no-op
+comparison 2.0 ms; one block changed gave one row for the compound, 128 ms
+of which 120 ms is the summary's volume (the same summary `create_object` runs),
+against 181 ms for recomputing the document. A shape that was rebuilt to the same
+geometry (an undone and redone step, a touched object) counts as changed.
+
 ### `delete_object`
 
 Delete an object from a document.
@@ -449,6 +469,17 @@ A ref's `sub` is either a plain element name on the object itself (`Face3`,
 anything below the top level (`Body.Pad.Face3`); pass `get_selection`'s
 `sub_elements` unchanged rather than shortening them, which would pick that
 element on the top object instead. Without `sub`, the whole object is used.
+
+A `distance` ref may carry `"point": "center"`: a circle or arc edge gives its
+centre, a spherical face its centre, a cylindrical face its axis. A centre to a
+centre is the point distance (a hole spacing instead of rim to rim), a centre
+to an axis the perpendicular distance, two axes the distance between the lines
+(the centre distance for parallel axes). A centre against a whole object or a
+plain sub-element is measured to that shape. The reply names what it used
+(`points_used`: `centre of Cut.Edge10 (circle of radius 1.6)`). `center` on any
+other sub-element, on a kind other than `distance`, or an axis against a plain
+shape is refused with a short message. Measured: two M3 holes 31 mm apart give
+27.8 mm rim to rim, 31 mm by edge centres and 31 mm by cylinder axes.
 
 The reply gives the value and its unit (`mm`, `deg`, `mm^2`, `mm^3`), and for
 `distance` the two closest points. A `sub` naming no face, edge or vertex of an
@@ -657,6 +688,9 @@ Import a CAD, mesh or 2D file into a document, without any dialog.
 - `include_screenshot`, `view_name`: see [screenshot options](#screenshot-options).
 - `timeout` (number, optional, default 300, up to 1800 seconds): raise it for
   large assemblies.
+
+The reply names the file (`Imported 'verify10.step' into new document ...`) and
+the front matter has its `file`.
 
 Supported extensions: `.step`/`.stp`, `.iges`/`.igs`, `.gltf`/`.glb`
 (assemblies keep their parts and colors), `.brep`/`.brp`, `.stl`/`.ast`,
@@ -987,6 +1021,10 @@ After the steps the reply lists every failed object of the document (not only
 the ones the steps caused) with the same rows and the same `Not rebuilt` line as
 the other tools, so the line appears once; the frontmatter has `invalid_count` and
 `stale_count` when there are any.
+
+The reply also lists the top-level shapes the steps changed, one line each in
+the shape format of `create_object` (`Shapes now: Plate: 1 solid, 60 x 56 x 5 mm,
+volume 16800.0 mm^3`); see [shape changes](#shape-changes).
 
 ### `redo`
 

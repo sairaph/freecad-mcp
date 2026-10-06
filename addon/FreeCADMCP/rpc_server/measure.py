@@ -69,6 +69,53 @@ def _radius_of(shape: Any, Part: Any) -> float | None:
     return None
 
 
+def _center_of(shape: Any, Part: Any) -> tuple[str, Any, Any, str] | None:
+    """What ``point: "center"`` means for ``shape``: ``("point", centre, None,
+    what)`` for a circular or arc edge or a spherical face, ``("axis", point on
+    the axis, direction, what)`` for a cylindrical face, None for anything else."""
+    shape_type = getattr(shape, "ShapeType", "")
+    if shape_type == "Edge":
+        curve = shape.Curve
+        if isinstance(curve, Part.Circle):
+            return "point", curve.Center, None, f"circle of radius {curve.Radius:.4g}"
+    elif shape_type == "Face":
+        surface = shape.Surface
+        if isinstance(surface, Part.Sphere):
+            return "point", surface.Center, None, f"sphere of radius {surface.Radius:.4g}"
+        if isinstance(surface, Part.Cylinder):
+            return "axis", surface.Center, surface.Axis.normalize(), f"cylinder of radius {surface.Radius:.4g}"
+    return None
+
+
+def _center_distance(a: tuple, b: tuple) -> tuple[float, list[list[float]]]:
+    """The distance between two centre points or axes (``_center_of`` results),
+    with the two points that give it: point to point, point to axis
+    (perpendicular), axis to axis (the closest points of the two lines; for
+    parallel axes the centre distance)."""
+    kind_a, p_a, d_a, _ = a
+    kind_b, p_b, d_b, _ = b
+    if kind_a == "point" and kind_b == "point":
+        return p_a.distanceToPoint(p_b), [_vector_list(p_a), _vector_list(p_b)]
+    if kind_a == "point" or kind_b == "point":
+        point, axis_point, axis_dir = (p_a, p_b, d_b) if kind_a == "point" else (p_b, p_a, d_a)
+        foot = axis_point.add(axis_dir.multiply(point.sub(axis_point).dot(axis_dir)))
+        pair = [_vector_list(point), _vector_list(foot)]
+        return point.distanceToPoint(foot), pair if kind_a == "point" else pair[::-1]
+    cross = d_a.cross(d_b)
+    if cross.Length < 1e-9:
+        foot = p_b.add(d_b.multiply(p_a.sub(p_b).dot(d_b)))
+        return p_a.distanceToPoint(foot), [_vector_list(p_a), _vector_list(foot)]
+    # Skew axes: the closest points of the two lines.
+    w = p_a.sub(p_b)
+    a_, b_, c_ = d_a.dot(d_a), d_a.dot(d_b), d_b.dot(d_b)
+    d__, e_ = d_a.dot(w), d_b.dot(w)
+    denominator = a_ * c_ - b_ * b_
+    t = (b_ * e_ - c_ * d__) / denominator
+    u = (a_ * e_ - b_ * d__) / denominator
+    q_a, q_b = p_a.add(d_a.multiply(t)), p_b.add(d_b.multiply(u))
+    return q_a.distanceToPoint(q_b), [_vector_list(q_a), _vector_list(q_b)]
+
+
 def _not_found_hint(doc: Any, name: str) -> str:
     return ("Call " + tool_call("list_subelements", {"doc_name": doc.Name, "obj_name": name})
             + " to see its faces and edges with their names.")
@@ -183,6 +230,13 @@ def _measure_gui(doc_name: str, kind: str, refs: list[dict[str, Any]]) -> dict[s
 
     result: dict[str, Any] = {"success": True, "document": doc.Name, "kind": kind, "refs": refs}
 
+    centres = [ref.get("point") for ref in refs]
+    if any(centres):
+        error = _measure_between_centres(doc, shapes, refs, result, Part)
+        if error is not None:
+            return error
+        return result
+
     if kind == "distance":
         dist, vectors, _infos = shapes[0].distToShape(shapes[1])
         result["value"] = finite_or_none(dist)
@@ -273,6 +327,43 @@ def _measure_gui(doc_name: str, kind: str, refs: list[dict[str, Any]]) -> dict[s
     return result
 
 
+def _measure_between_centres(doc: Any, shapes: list[Any], refs: list[dict[str, Any]], result: dict[str, Any], Part: Any) -> dict[str, Any] | None:
+    """Fill ``result`` for a distance where a ref asks for its centre; a fail()
+    reply when one cannot give it."""
+    found = []
+    used = []
+    for ref, shape in zip(refs, shapes):
+        if not ref.get("point"):
+            found.append(None)
+            continue
+        centre = _center_of(shape, Part)
+        label = f"{ref.get('object')}.{ref['sub']}" if ref.get("sub") else str(ref.get("object"))
+        if centre is None:
+            return fail(
+                INVALID_INPUT,
+                f"{label} has no centre: point center takes a circle or arc edge, a spherical face or a cylindrical face",
+                "Call " + tool_call("list_subelements", {"doc_name": doc.Name, "obj_name": ref.get("object")})
+                + " to see edges with their curve type and faces with their surface type.",
+            )
+        found.append(centre)
+        used.append(f"{'centre' if centre[0] == 'point' else 'axis'} of {label} ({centre[3]})")
+    if found[0] is not None and found[1] is not None:
+        value, points = _center_distance(found[0], found[1])
+    else:
+        # One ref gives a centre, the other is a whole shape or a plain sub-element.
+        centre, other = (found[0], shapes[1]) if found[0] is not None else (found[1], shapes[0])
+        if centre[0] == "axis":
+            return fail(INVALID_INPUT, "a cylinder's axis can be measured to another centre or axis only: give point center on both refs")
+        value, vectors, _infos = Part.Vertex(centre[1]).distToShape(other)
+        points = [_vector_list(vectors[0][0]), _vector_list(vectors[0][1])] if vectors else []
+    result["value"] = finite_or_none(value)
+    result["unit"] = "mm"
+    if points:
+        result["points"] = points
+    result["points_used"] = used
+    return None
+
+
 def measure(doc_name: str, kind: str, refs: list[dict[str, Any]]) -> dict[str, Any]:
     """Measure ``kind`` over ``refs`` ([{"object", "sub"?}]).
 
@@ -298,5 +389,9 @@ def measure(doc_name: str, kind: str, refs: list[dict[str, Any]]) -> dict[str, A
     for ref in refs:
         if not isinstance(ref, dict) or not ref.get("object"):
             return fail(INVALID_INPUT, f'each ref needs an "object" name, got {ref!r}')
+        if ref.get("point") not in (None, "center"):
+            return fail(INVALID_INPUT, f'point must be "center", got {ref.get("point")!r}')
+        if ref.get("point") and kind != "distance":
+            return fail(INVALID_INPUT, f'point "center" is for distance, not {kind}')
 
     return run_on_gui(lambda: _measure_gui(doc_name, kind, refs), _TIMEOUT, "measure")

@@ -70,6 +70,20 @@ def owner_body(doc: Any, obj: Any) -> Any:
     return None
 
 
+def leave_body(doc: Any, name: str) -> None:
+    """Take the object called ``name`` out of its Body before it is deleted,
+    as FreeCAD's own delete does (``Body.removeObject``): the Tip and the
+    BaseFeature chain then move to the feature before it. Deleting it from the
+    document alone leaves the Body with no Tip and a stale shape. Does nothing
+    for an object that is in no Body."""
+    target = doc.getObject(name)
+    if target is None or target.TypeId == BODY_TYPE:
+        return
+    body = next((b for b in bodies(doc) if any(m.Name == name for m in b.Group)), None)
+    if body is not None:
+        body.removeObject(target)
+
+
 def named_body(doc: Any, name: str) -> Any:
     body = doc.getObject(name) if isinstance(name, str) else None
     if body is None or body.TypeId != BODY_TYPE:
@@ -239,7 +253,7 @@ def _point(value: Any, what: str) -> Any:
 _GEOMETRY_FORMS = (
     '{"line": [[x1, y1], [x2, y2]]}, {"circle": {"center": [x, y], "radius": r}}, '
     '{"arc": {"center": [x, y], "radius": r, "start_angle": a, "end_angle": b}} (degrees, counter-clockwise) '
-    'or {"rectangle": {"corner": [x, y], "size": [w, h]}}'
+    '{"rectangle": {"corner": [x, y], "size": [w, h]}} or {"slot": {"center1": [x, y], "center2": [x, y], "width": w}}'
 )
 
 
@@ -291,25 +305,48 @@ def _parse_geometry(entries: Any) -> list[tuple[str, Any]]:
             x, y, w, h = corner.x, corner.y, size.x, size.y
             corners = [FreeCAD.Vector(x, y, 0), FreeCAD.Vector(x + w, y, 0), FreeCAD.Vector(x + w, y + h, 0), FreeCAD.Vector(x, y + h, 0)]
             out.append((kind, [Part.LineSegment(corners[i], corners[(i + 1) % 4]) for i in range(4)]))
+        elif kind == "slot":
+            if not isinstance(spec, dict) or set(spec) != {"center1", "center2", "width"}:
+                raise ValueError('A slot is {"center1": [x, y], "center2": [x, y], "width": w}.')
+            c1, c2 = _point(spec["center1"], "center1 of a slot"), _point(spec["center2"], "center2 of a slot")
+            width = _number(spec["width"], "The width of a slot")
+            if width <= 0:
+                raise ValueError(f"The width of a slot must be above 0, not {width:g}.")
+            length = c1.distanceToPoint(c2)
+            if length == 0:
+                raise ValueError("A slot needs two different centres.")
+            r = width / 2
+            dx, dy = (c2.x - c1.x) / length, (c2.y - c1.y) / length
+            nx, ny = -dy, dx
+            normal_angle = math.atan2(ny, nx)
+            v = FreeCAD.Vector
+            # Counter-clockwise: the line along -n, the cap at centre2, the line back along +n, the cap at centre1.
+            out.append((kind, [
+                Part.LineSegment(v(c1.x - nx * r, c1.y - ny * r, 0), v(c2.x - nx * r, c2.y - ny * r, 0)),
+                Part.ArcOfCircle(Part.Circle(c2, v(0, 0, 1), r), normal_angle - math.pi, normal_angle),
+                Part.LineSegment(v(c2.x + nx * r, c2.y + ny * r, 0), v(c1.x + nx * r, c1.y + ny * r, 0)),
+                Part.ArcOfCircle(Part.Circle(c1, v(0, 0, 1), r), normal_angle, normal_angle + math.pi),
+            ]))
         else:
             raise ValueError(f"Unknown geometry '{kind}'; expected {_GEOMETRY_FORMS}.")
     return out
 
 
 def set_geometry(sketch: Any, entries: Any) -> None:
-    """Replace the geometry of ``sketch`` with ``entries``. A rectangle is four
-    lines with their corners coincident. Constraints are not part of it."""
+    """Replace the geometry of ``sketch`` with ``entries``. A rectangle (four
+    lines) and a slot (two lines and two arcs) are closed chains with each end
+    coincident with the next start. Other constraints are not part of it."""
     parsed = _parse_geometry(entries)
     import Sketcher
 
     sketch.deleteAllGeometry()
     for kind, shapes in parsed:
-        if kind != "rectangle":
+        if kind not in ("rectangle", "slot"):
             sketch.addGeometry(shapes, False)
             continue
-        ids = [sketch.addGeometry(line, False) for line in shapes]
-        for i in range(4):
-            sketch.addConstraint(Sketcher.Constraint("Coincident", ids[i], 2, ids[(i + 1) % 4], 1))
+        ids = [sketch.addGeometry(part, False) for part in shapes]
+        for i, geo in enumerate(ids):
+            sketch.addConstraint(Sketcher.Constraint("Coincident", geo, 2, ids[(i + 1) % len(ids)], 1))
 
 
 def sketch_fields(sketch: Any) -> dict[str, Any]:

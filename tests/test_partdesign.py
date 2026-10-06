@@ -544,3 +544,56 @@ def test_a_failed_mesh_generation_says_the_mesh_may_hold_a_partial_result(monkey
         monkeypatch.setattr(factory, "generate_mesh", lambda _o: (_ for _ in ()).throw(RuntimeError("gmsh failed")))
         result = factory.edit_object_gui("Doc", factory.Object(name="Mesh", properties={"CharacteristicLengthMax": 6}))
     assert result == "gmsh failed. Nothing was changed; the mesh itself may hold a partial result: run_fem_analysis remeshes it."
+
+
+def test_a_slot_is_two_lines_and_two_arcs_joined_into_a_closed_chain(pd) -> None:
+    sketch = Sketch()
+    pd.set_geometry(sketch, [{"slot": {"center1": [10, 10], "center2": [30, 10], "width": 8}}])
+    line1, arc2, line2, arc1 = sketch.geometry
+    assert line1 == ("line", (10, 6), (30, 6)) and line2 == ("line", (30, 14), (10, 14))
+    # Caps are centred on the two points, a half turn each, counter-clockwise.
+    assert arc2 == ("arc", (30, 10), 4, -90.0, 90.0) and arc1 == ("arc", (10, 10), 4, 90.0, 270.0)
+    joins = [c for c in sketch.calls if isinstance(c, tuple)]
+    assert joins == [("Coincident", 0, 2, 1, 1), ("Coincident", 1, 2, 2, 1), ("Coincident", 2, 2, 3, 1), ("Coincident", 3, 2, 0, 1)]
+
+
+def test_a_slot_along_a_diagonal_keeps_its_width(pd) -> None:
+    sketch = Sketch()
+    pd.set_geometry(sketch, [{"slot": {"center1": [0, 0], "center2": [-20, -15], "width": 6}}])
+    (_, a, b), _arc, (_, c, d), _arc2 = sketch.geometry
+    assert math.dist(a, d) == pytest.approx(6.0) and math.dist(b, c) == pytest.approx(6.0)
+
+
+@pytest.mark.parametrize(
+    "spec, message",
+    [
+        ({"center1": [0, 0], "center2": [0, 0], "width": 5}, "two different centres"),
+        ({"center1": [0, 0], "center2": [5, 0], "width": 0}, "must be above 0"),
+        ({"center1": [0, 0], "center2": [5, 0], "width": -1}, "must be above 0"),
+        ({"center1": [0, 0], "center2": [5, 0]}, "A slot is"),
+        ({"center1": [0, 0], "center2": [5, 0], "width": 2, "extra": 1}, "A slot is"),
+        ({"center1": [0], "center2": [5, 0], "width": 2}, "x, y"),
+        ({"center1": [0, 0], "center2": [5, 0], "width": "2"}, "must be a number"),
+    ],
+)
+def test_a_bad_slot_is_refused_before_the_sketch_is_touched(pd, spec, message) -> None:
+    sketch = Sketch(geometry=2)
+    with pytest.raises(ValueError, match=message):
+        pd.set_geometry(sketch, [{"slot": spec}])
+    assert sketch.calls == []
+
+
+def test_a_feature_leaves_its_body_before_it_is_deleted_and_other_objects_are_left_alone(pd) -> None:
+    body = Body("Body")
+    removed = []
+    body.removeObject = lambda obj: removed.append(obj.Name)
+    pad = Obj("Pad", "PartDesign::Pad")
+    loose = Obj("Loose", "Part::Box")
+    body.Group.append(pad)
+    doc = Doc(body, pad, loose)
+    pd.leave_body(doc, "Loose")
+    pd.leave_body(doc, "Body")
+    pd.leave_body(doc, "Missing")
+    assert removed == []
+    pd.leave_body(doc, "Pad")
+    assert removed == ["Pad"]
