@@ -23,6 +23,7 @@ type recomputeFront struct {
 	InvalidCount int    `yaml:"invalid_count"`
 	TouchedCount int    `yaml:"touched_count"`
 	EmptyCount   int    `yaml:"empty_count"`
+	StaleMeshes  int    `yaml:"stale_meshes"`
 	StaleCount   int    `yaml:"stale_count"`
 }
 
@@ -56,6 +57,7 @@ func (s *Server) recomputeDocument(ctx context.Context, _ *mcp.CallToolRequest, 
 	touchedCount := intField(res, "touched_count")
 	emptyObjs, _ := res["empty_results"].([]any)
 	emptyCount := intField(res, "empty_count")
+	staleMeshes, _ := res["stale_meshes"].([]any)
 	front := recomputeFront{
 		Document:     in.DocName,
 		Recomputed:   intField(res, "recomputed"),
@@ -63,6 +65,7 @@ func (s *Server) recomputeDocument(ctx context.Context, _ *mcp.CallToolRequest, 
 		InvalidCount: invalidCount,
 		TouchedCount: touchedCount,
 		EmptyCount:   emptyCount,
+		StaleMeshes:  len(staleMeshes),
 		StaleCount:   intField(res, "stale_count"),
 	}
 
@@ -72,7 +75,7 @@ func (s *Server) recomputeDocument(ctx context.Context, _ *mcp.CallToolRequest, 
 		switch {
 		case front.Recomputed == 0:
 			fmt.Fprintf(&body, "Document '%s': no object needed a recompute; %d object(s), none invalid.", in.DocName, objectCount)
-		case emptyCount == 0:
+		case emptyCount == 0 && len(staleMeshes) == 0:
 			fmt.Fprintf(&body, "Document '%s' recomputed cleanly: %d object(s), none invalid.", in.DocName, objectCount)
 		default:
 			fmt.Fprintf(&body, "Document '%s' recomputed: %d object(s), none invalid.", in.DocName, objectCount)
@@ -89,6 +92,16 @@ func (s *Server) recomputeDocument(ctx context.Context, _ *mcp.CallToolRequest, 
 		}
 		if boolField(res, "invalid_truncated") {
 			fmt.Fprintf(&body, "\n\n(showing the first %d of %d; call recompute_document again after fixing some of these)", len(invalidObjs), invalidCount)
+		}
+	}
+	for _, item := range staleMeshes {
+		if m, ok := item.(map[string]any); ok {
+			if str(m, "found_by") == "mesh" {
+				fmt.Fprintf(&body, "\n\n%s: its mesh is not the one last made from %s (an undo restores the record, not the mesh); run_fem_analysis remeshes it.",
+					str(m, "mesh"), str(m, "shape"))
+				continue
+			}
+			fmt.Fprintf(&body, "\n\n%s: %s changed since it was meshed; run_fem_analysis remeshes it.", str(m, "mesh"), str(m, "shape"))
 		}
 	}
 	if emptyCount > 0 {

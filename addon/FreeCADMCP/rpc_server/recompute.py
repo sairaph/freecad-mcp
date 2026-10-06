@@ -9,6 +9,7 @@ this recompute counts as a failure, since that means the object was skipped
 from typing import Any
 
 from rpc_server.empty_results import SOLID_INPUTS, empty_result
+from rpc_server.fem_mesh import is_gmsh, mesh_changed_since_meshing, meshed_shape
 from rpc_server.gui_task import resolve_timeout, run_on_gui
 from rpc_server.lookup import require_document
 from rpc_server.object_validation import (
@@ -30,7 +31,7 @@ def recompute_document(doc_name: str, timeout: Any = None) -> dict[str, Any]:
     "invalid_objects", "invalid_count", "invalid_truncated",
     "stale_objects", "stale_count", "stale_truncated", "touched_objects",
     "touched_count", "touched_truncated", "empty_results", "empty_count",
-    "empty_truncated"}``. ``touched_*`` holds only the Touched objects that are
+    "empty_truncated", "stale_meshes"}``. ``touched_*`` holds only the Touched objects that are
     not listed as invalid. The lists are capped at MAX_LISTED_OBJECTS rows, with the matching ``*_count``
     giving the true total and ``*_truncated`` set once the cap cuts the
     list short. GUI thread, default timeout ``RECOMPUTE_TIMEOUT``. No
@@ -71,6 +72,12 @@ def recompute_document(doc_name: str, timeout: Any = None) -> dict[str, Any]:
                 empty_count += 1
                 if len(empty_results) < MAX_LISTED_OBJECTS:
                     empty_results.append({"name": str(obj.Name), "reason": found[1]})
+        stale_meshes = []
+        for obj in objects:
+            if is_gmsh(obj):
+                found = mesh_changed_since_meshing(obj)
+                if found is not None:
+                    stale_meshes.append({"mesh": str(obj.Name), "shape": str(getattr(meshed_shape(obj), "Name", "")), "found_by": found})
         return {
             "success": True,
             "document": doc_name,
@@ -83,6 +90,7 @@ def recompute_document(doc_name: str, timeout: Any = None) -> dict[str, Any]:
             "empty_results": empty_results,
             "empty_count": empty_count,
             "empty_truncated": empty_count > len(empty_results),
+            "stale_meshes": stale_meshes,
         }
 
     return run_on_gui(task, run_budget, "recompute_document", tool=TOOL_NAME)

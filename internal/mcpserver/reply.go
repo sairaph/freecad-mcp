@@ -416,6 +416,9 @@ func placementNote(body string, res map[string]any) string {
 // the edges of a fillet or chamfer as they are now, and the objects that went
 // from visible to hidden (the inputs FreeCAD hides itself).
 func featureNote(body string, res map[string]any) string {
+	if mesh, ok := res["mesh"].(map[string]any); ok {
+		body += "\n\n" + meshText(mesh)
+	}
 	if shape, ok := res["shape"].(map[string]any); ok {
 		body += "\n\nShape: " + shapeText(shape)
 	}
@@ -815,4 +818,23 @@ func failedNames(res map[string]any) string {
 		}
 	}
 	return strings.Join(parts, "; ")
+}
+
+// meshText says what a Gmsh mesh object is after create_object or
+// update_object meshed it: its element order and node count, and how many
+// nodes the mesh it replaced had.
+func meshText(mesh map[string]any) string {
+	text := fmt.Sprintf("Mesh %s:", str(mesh, "name"))
+	if order := str(mesh, "element_order"); order != "" {
+		text += " " + order + " order tetrahedra"
+		if order == "1st" {
+			text += " (bending results come out too stiff; set ElementOrder to 2nd)"
+		}
+		text += ","
+	}
+	text += fmt.Sprintf(" %d nodes", intField(mesh, "node_count"))
+	if _, ok := mesh["remeshed_from_nodes"]; ok {
+		text += fmt.Sprintf(", meshed again (it had %d)", intField(mesh, "remeshed_from_nodes"))
+	}
+	return text + "."
 }

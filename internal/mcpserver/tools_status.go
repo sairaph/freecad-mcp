@@ -455,6 +455,11 @@ func femFailureHint(res map[string]any, larger string) string {
 		return "The analysis did not start in time: earlier GUI operations held FreeCAD's GUI thread for the whole " +
 			"timeout, which also bounds the wait to start. Call get_rpc_status to see what is running. A larger " +
 			"timeout also allows a longer wait to start; the most is " + fmt.Sprint(maxFEMTimeout) + " seconds."
+	case strings.HasPrefix(e, "The result is all zero"):
+		return "The result object is kept. Call list_subelements on the loaded solid to check the faces, make sure the mesh " +
+			"matches the solid (update_object on the mesh meshes it again), then run again."
+	case strings.HasPrefix(e, "The result has no displacement data"):
+		return "The result object is kept. Open the .frd and .dat files in the working directory to see what the solver wrote."
 	case strings.HasPrefix(e, "GUI dispatch unavailable"):
 		return "The analysis did not start: another GUI operation timed out and is still running on FreeCAD's GUI " +
 			"thread. Call get_rpc_status and wait until it reports the dispatch healthy, then retry, or restart FreeCAD."
@@ -547,9 +552,49 @@ func (s *Server) runFEMAnalysis(ctx context.Context, _ *mcp.CallToolRequest, in 
 	if n, ok := res["node_count"].(int64); ok {
 		front.NodeCount = &n
 	}
-	res["summary"] = fmt.Sprintf("FEM analysis '%s' solved. max von Mises = %s, max displacement = %s (%v nodes).",
-		in.AnalysisName, formatMeasure(res["max_von_mises_MPa"], "MPa"), formatMeasure(res["max_displacement_mm"], "mm"), res["node_count"])
-	body := transactionNote(res["summary"].(string)+femLoadsText(res)+femColourText(res)+"\n\n"+jsonBlock(res), txName, txMerged)
+	res["summary"] = fmt.Sprintf("FEM analysis '%s' solved. max von Mises = %s, max displacement = %s (%v nodes%s).",
+		in.AnalysisName, formatMeasure(res["max_von_mises_MPa"], "MPa"), formatMeasure(res["max_displacement_mm"], "mm"), res["node_count"], femOrderText(res))
+	body := transactionNote(res["summary"].(string)+femMeshText(res)+femLoadsText(res)+femColourText(res)+"\n\n"+jsonBlock(res), txName, txMerged)
 	out := render.SuccessResult(front, body)
 	return s.withNotice(s.screenshot(ctx, conn, out, in.IncludeScreenshot, viewString(in.ViewName), in.DocName)), nil, nil
+}
+
+// femOrderText is ", 2nd order" for the summary line when the run's solid mesh
+// has a known element order, else "".
+func femOrderText(res map[string]any) string {
+	meshes, _ := res["meshes"].([]any)
+	for _, item := range meshes {
+		if mesh, ok := item.(map[string]any); ok {
+			if order := str(mesh, "element_order"); order != "" {
+				return ", " + order + " order"
+			}
+		}
+	}
+	return ""
+}
+
+// femMeshText reports what the run did to the meshes and what it found wrong
+// with them: each mesh it made again because its solid changed since it was
+// meshed, then the warnings (a first order mesh).
+func femMeshText(res map[string]any) string {
+	var b strings.Builder
+	remeshed, _ := res["remeshed"].([]any)
+	for _, item := range remeshed {
+		if r, ok := item.(map[string]any); ok {
+			if str(r, "found_by") == "mesh" {
+				fmt.Fprintf(&b, "\nRemeshed %s: it was not the mesh last made from %s (%d -> %d nodes).",
+					str(r, "mesh"), str(r, "shape"), intField(r, "nodes_before"), intField(r, "nodes_after"))
+				continue
+			}
+			fmt.Fprintf(&b, "\nRemeshed %s: %s changed since it was meshed (%d -> %d nodes).",
+				str(r, "mesh"), str(r, "shape"), intField(r, "nodes_before"), intField(r, "nodes_after"))
+		}
+	}
+	for _, w := range stringItems(res["warnings"]) {
+		fmt.Fprintf(&b, "\nWarning: %s", w)
+	}
+	if b.Len() == 0 {
+		return ""
+	}
+	return "\n" + b.String()
 }

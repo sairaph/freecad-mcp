@@ -20,6 +20,7 @@ import ObjectsFem
 
 from rpc_server.agent_log import agent_error, agent_warning
 from rpc_server.empty_results import empty_result
+from rpc_server.fem_mesh import changes_meshing, generate_mesh, is_gmsh, mesh_info
 from rpc_server.fem_loads import load_info
 from rpc_server.property_mapper import FILLET_TYPES, Object, fillet_edges_text, quantity_values, set_object_property
 from rpc_server.object_validation import failed_names, newly_failed_report, object_validity_error, stale_dependents
@@ -35,8 +36,6 @@ def _create_fem_mesh(doc: FreeCAD.Document, obj: Object):
     ``ElementSize{Max,Min}``/``CharacteristicLength{Max,Min}``).
     Returns the created mesh object.
     """
-    from femmesh.gmshtools import GmshTools
-
     res = getattr(doc, obj.analysis).addObject(
         ObjectsFem.makeMeshGmsh(doc, obj.name)
     )[0]
@@ -69,7 +68,11 @@ def _create_fem_mesh(doc: FreeCAD.Document, obj: Object):
     set_object_property(doc, res, properties)
     doc.recompute()
 
-    GmshTools(res).create_mesh()
+    if "ElementOrder" not in obj.properties and "ElementOrder" in res.PropertiesList:
+        # FreeCAD's own command meshes second order: linear tetrahedra lock in
+        # bending and give results about three times too stiff.
+        res.ElementOrder = "2nd"
+    generate_mesh(res)
     FreeCAD.Console.PrintMessage(
         f"FEM Mesh '{res.Name}' generated successfully in '{doc.Name}'.\n"
     )
@@ -462,6 +465,8 @@ def create_object_gui(doc_name: str, obj: Object):
             quantities = quantity_values(created, requested)
             load = load_info(created)
             extra = _name_and_placement_fields(created, requested)
+            if is_gmsh(created):
+                extra["mesh"] = mesh_info(created)
             if not problem:
                 hide_sources(created, None)
                 extra.update(_shape_fields(created))
@@ -518,6 +523,12 @@ def edit_object_gui(doc_name: str, obj: Object):
             quantities = quantity_values(obj_ins, obj.properties)
             load = load_info(obj_ins)
             extra = _name_and_placement_fields(obj_ins, list(obj.properties))
+            if is_gmsh(obj_ins) and not problem and changes_meshing(obj_ins, obj.properties):
+                # The mesh does not follow its solid or its parameters by
+                # itself: mesh again, as create_object does.
+                nodes_before = obj_ins.FemMesh.NodeCount
+                generate_mesh(obj_ins)
+                extra["mesh"] = {**mesh_info(obj_ins), "remeshed_from_nodes": int(nodes_before)}
             if not problem:
                 hide_sources(obj_ins, obj.properties)
                 extra.update(_shape_fields(obj_ins))

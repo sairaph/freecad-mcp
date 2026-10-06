@@ -39,6 +39,7 @@ def _to_shape_color(val: Any) -> tuple[float, float, float, float]:
 _REFERENCE_FORMS = (
     '{"object_name": "Box", "face": "Face1"}, '
     '{"object_name": "Box", "faces": ["Face1", "Face2"]}, '
+    '{"object_name": "Box", "edge": "Edge5"}, '
     '["Box", "Face1"] or ["Box", ["Face1", "Face2"]]'
 )
 
@@ -61,7 +62,8 @@ def parse_reference_entry(entry: Any) -> tuple[str, str | list[str]]:
 
     ``sub_elements`` is one name or a list of names. Accepts
     ``{"object_name": "Box", "face": "Face1"}``,
-    ``{"object_name": "Box", "faces": ["Face1", "Face2"]}``,
+    ``{"object_name": "Box", "faces": ["Face1", "Face2"]}``, the same with "edge"
+    or "edges",
     ``["Box", "Face1"]`` and ``["Box", ["Face1", "Face2"]]``.
     """
     ref_name = None
@@ -69,7 +71,10 @@ def parse_reference_entry(entry: Any) -> tuple[str, str | list[str]]:
     if isinstance(entry, dict):
         ref_name = entry.get("object_name", entry.get("Object"))
         subs = _sub_elements(
-            entry.get("faces", entry.get("face", entry.get("Face")))
+            entry.get(
+                "faces",
+                entry.get("face", entry.get("Face", entry.get("edges", entry.get("edge", entry.get("Edge"))))),
+            )
         )
     elif isinstance(entry, (list, tuple)) and len(entry) == 2:
         ref_name = entry[0]
@@ -109,6 +114,13 @@ def _type_id(obj: FreeCAD.DocumentObject, prop: str) -> str:
         return obj.getTypeIdOfProperty(prop)
     except Exception:
         return ""
+
+
+def _is_sub_link(obj: FreeCAD.DocumentObject, prop: str) -> bool:
+    """Whether ``prop`` links one object with sub-elements (App::PropertyLinkSub
+    and its XLink variants), not a list of such links."""
+    type_id = _type_id(obj, prop)
+    return type_id.startswith(("App::PropertyLinkSub", "App::PropertyXLinkSub")) and "List" not in type_id
 
 
 def _link_kind(obj: FreeCAD.DocumentObject, prop: str) -> str:
@@ -379,6 +391,12 @@ def set_object_property(
                         raise ValueError(
                             f"References must be a list; each entry is {_REFERENCE_FORMS}."
                         )
+
+                elif _is_sub_link(obj, prop) and isinstance(val, (list, tuple, dict)):
+                    # One sub-element link (a force's Direction): the forms
+                    # References takes for one sub-element.
+                    ref_name, subs = parse_reference_entry(val)
+                    setattr(obj, prop, (_link_object(doc, ref_name), [subs] if isinstance(subs, str) else subs))
 
                 elif isinstance(val, str) and _link_kind(obj, prop) == "single":
                     setattr(obj, prop, _link_object(doc, val))

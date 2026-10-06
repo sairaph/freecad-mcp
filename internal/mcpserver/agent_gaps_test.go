@@ -483,3 +483,96 @@ func TestImportNamesTheObjectsBuiltOnAFailedOne(t *testing.T) {
 		}
 	}
 }
+
+func TestMeshObjectRepliesStateTheOrderAndTheNodeCount(t *testing.T) {
+	create := func([]any) (any, error) {
+		return map[string]any{"success": true, "object_name": "Mesh", "mesh": map[string]any{"name": "Mesh", "element_order": "2nd", "node_count": int64(3746)}}, nil
+	}
+	edit := func([]any) (any, error) {
+		return map[string]any{"success": true, "object_name": "Mesh",
+			"mesh": map[string]any{"name": "Mesh", "element_order": "1st", "node_count": int64(198), "remeshed_from_nodes": int64(3746)}}, nil
+	}
+	fc := addon(t, map[string]xmlrpctest.Handler{"create_object": create, "edit_object": edit})
+	cs := session(t, settingsFor(fc))
+	text := replyText(call(t, cs, "create_object", map[string]any{"doc_name": "D", "obj_name": "Mesh", "obj_type": "Fem::FemMeshGmsh", "include_screenshot": false}))
+	if !strings.Contains(text, "Mesh Mesh: 2nd order tetrahedra, 3746 nodes.") {
+		t.Errorf("create reply = %s", text)
+	}
+	text = replyText(call(t, cs, "update_object", map[string]any{"doc_name": "D", "obj_name": "Mesh", "obj_properties": map[string]any{"ElementOrder": "1st"}, "include_screenshot": false}))
+	if !strings.Contains(text, "Mesh Mesh: 1st order tetrahedra (bending results come out too stiff; set ElementOrder to 2nd), 198 nodes, meshed again (it had 3746).") {
+		t.Errorf("update reply = %s", text)
+	}
+}
+
+func TestRunFEMAnalysisSaysWhatItMeshedAgainAndWhatLooksWrong(t *testing.T) {
+	solved := map[string]any{"success": true, "result_object": "CCX_Results", "node_count": int64(3888), "max_von_mises_MPa": 123.6, "max_displacement_mm": 1.077,
+		"loads": []any{}, "working_dir": "C:/w", "meshes": []any{map[string]any{"name": "Mesh", "element_order": "1st", "node_count": int64(3888)}},
+		"remeshed": []any{map[string]any{"mesh": "Mesh", "shape": "Beam", "found_by": "fingerprint", "nodes_before": int64(3746), "nodes_after": int64(3888)}},
+		"warnings": []any{"Mesh uses first order tetrahedra: bending results come out too stiff. Set ElementOrder to 2nd with update_object."}}
+	zero := map[string]any{"success": false, "error": "The result is all zero: no load reached the mesh. The mesh may not match the solid, or a load names a face that no longer exists.",
+		"result_object": "CCX_Results", "node_count": int64(654), "max_displacement_mm": 0.0, "working_dir": "C:/w"}
+	fc := addon(t, map[string]xmlrpctest.Handler{"run_fem_analysis": func([]any) (any, error) { return solved, nil }})
+	text := replyText(call(t, session(t, settingsFor(fc)), "run_fem_analysis", map[string]any{"doc_name": "D", "analysis_name": "A", "include_screenshot": false}))
+	for _, want := range []string{"(3888 nodes, 1st order).", "Remeshed Mesh: Beam changed since it was meshed (3746 -> 3888 nodes).", "Warning: Mesh uses first order tetrahedra"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("run reply lacks %q:\n%s", want, text)
+		}
+	}
+	fc = addon(t, map[string]xmlrpctest.Handler{"run_fem_analysis": func([]any) (any, error) { return zero, nil }})
+	res := call(t, session(t, settingsFor(fc)), "run_fem_analysis", map[string]any{"doc_name": "D", "analysis_name": "A", "include_screenshot": false})
+	text = replyText(res)
+	for _, want := range []string{"The result is all zero: no load reached the mesh.", "The result object is kept.", "CCX_Results"} {
+		if !res.IsError || !strings.Contains(text, want) {
+			t.Errorf("all-zero reply lacks %q (error=%v):\n%s", want, res.IsError, text)
+		}
+	}
+}
+
+func TestRecomputeNamesMeshesWhoseSolidChanged(t *testing.T) {
+	fc := addon(t, map[string]xmlrpctest.Handler{"recompute_document": func([]any) (any, error) {
+		return map[string]any{"success": true, "document": "D", "recomputed": int64(0), "object_count": int64(5), "invalid_count": int64(0), "invalid_truncated": false,
+			"touched_objects": []any{}, "touched_count": int64(0), "touched_truncated": false, "empty_results": []any{}, "empty_count": int64(0), "empty_truncated": false,
+			"stale_objects": []any{}, "stale_count": int64(0), "stale_truncated": false,
+			"stale_meshes": []any{map[string]any{"mesh": "Mesh", "shape": "Beam", "found_by": "fingerprint"}}}, nil
+	}})
+	text := replyText(call(t, session(t, settingsFor(fc)), "recompute_document", map[string]any{"doc_name": "D", "include_screenshot": false}))
+	if !strings.Contains(text, "Mesh: Beam changed since it was meshed; run_fem_analysis remeshes it.") || !strings.Contains(text, "stale_meshes: 1") {
+		t.Errorf("reply = %s", text)
+	}
+}
+
+func TestRunFEMAnalysisWithoutDisplacementDataSaysSoPlainly(t *testing.T) {
+	fc := addon(t, map[string]xmlrpctest.Handler{"run_fem_analysis": func([]any) (any, error) {
+		return map[string]any{"success": false, "error": "The result has no displacement data: the solver produced nothing to read. Inspect the solver output in the working directory.",
+			"result_object": "CCX_Results", "node_count": int64(0), "working_dir": "C:/w"}, nil
+	}})
+	res := call(t, session(t, settingsFor(fc)), "run_fem_analysis", map[string]any{"doc_name": "D", "analysis_name": "A", "include_screenshot": false})
+	text := replyText(res)
+	if !res.IsError || !strings.Contains(text, "The result has no displacement data") || strings.Contains(text, "all zero") || !strings.Contains(text, "Open the .frd and .dat files") {
+		t.Errorf("reply = %s", text)
+	}
+}
+
+func TestAMeshThatIsNotTheOneLastMadeIsNamedAsSuch(t *testing.T) {
+	fc := addon(t, map[string]xmlrpctest.Handler{
+		"recompute_document": func([]any) (any, error) {
+			return map[string]any{"success": true, "document": "D", "recomputed": int64(0), "object_count": int64(5), "invalid_count": int64(0), "invalid_truncated": false,
+				"touched_objects": []any{}, "touched_count": int64(0), "touched_truncated": false, "empty_results": []any{}, "empty_count": int64(0), "empty_truncated": false,
+				"stale_objects": []any{}, "stale_count": int64(0), "stale_truncated": false,
+				"stale_meshes": []any{map[string]any{"mesh": "Mesh", "shape": "Beam", "found_by": "mesh"}}}, nil
+		},
+		"run_fem_analysis": func([]any) (any, error) {
+			return map[string]any{"success": true, "result_object": "R", "node_count": int64(3746), "max_von_mises_MPa": 70.0, "max_displacement_mm": 0.45, "loads": []any{},
+				"working_dir": "C:/w", "remeshed": []any{map[string]any{"mesh": "Mesh", "shape": "Beam", "found_by": "mesh", "nodes_before": int64(1003), "nodes_after": int64(3746)}}}, nil
+		},
+	})
+	cs := session(t, settingsFor(fc))
+	text := replyText(call(t, cs, "recompute_document", map[string]any{"doc_name": "D", "include_screenshot": false}))
+	if !strings.Contains(text, "Mesh: its mesh is not the one last made from Beam") || strings.Contains(text, "changed since it was meshed") {
+		t.Errorf("recompute reply = %s", text)
+	}
+	text = replyText(call(t, cs, "run_fem_analysis", map[string]any{"doc_name": "D", "analysis_name": "A", "include_screenshot": false}))
+	if !strings.Contains(text, "Remeshed Mesh: it was not the mesh last made from Beam (1003 -> 3746 nodes).") {
+		t.Errorf("run reply = %s", text)
+	}
+}
