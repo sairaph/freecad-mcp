@@ -67,6 +67,19 @@ const (
 		"until the settings file is fixed. " + statusHint
 )
 
+// dialogBlockedHint is the hint when a dialog or open menu holds FreeCAD's GUI
+// thread: nothing the agent sends can help until a person closes it.
+const dialogBlockedHint = "A dialog or menu is open in FreeCAD and holds its GUI thread, so no call can run. " +
+	"Ask the user to close it, then call again."
+
+// dialogBlocked reports whether an addon failure message says the GUI thread
+// is held by a modal dialog or an open popup menu (gui_dispatch.py names the
+// guard that deferred the task).
+func dialogBlocked(msg string) bool {
+	return strings.Contains(msg, "GUI thread is not processing tasks: a modal dialog is open") ||
+		strings.Contains(msg, "GUI thread is not processing tasks: a popup or context menu is open")
+}
+
 // toolError is an error that already carries its structured form.
 type toolError struct{ e render.Error }
 
@@ -109,6 +122,9 @@ func failure(ctx context.Context, what string, err error, hint string) *mcp.Call
 			e.Hint = "The FreeCAD addon is older than this server. Run `" + domain.BinaryName + " install-addon` and restart FreeCAD."
 		case fault.SettingsUnreadable():
 			e.Hint = settingsUnreadableHint
+		case dialogBlocked(err.Error()):
+			e.Code = render.CodeUnavailable
+			e.Hint = dialogBlockedHint
 		}
 	case errors.As(err, &perr):
 		// The same rejection connector.get, probe and start_freecad already
@@ -544,6 +560,9 @@ func reportedCode(what string, res map[string]any, hint string, hintCodes ...str
 	if hint == "" {
 		hint = codeHints[code]
 	}
+	if dialogBlocked(msg) {
+		code, hint = render.CodeUnavailable, dialogBlockedHint
+	}
 	e := render.Error{
 		Code:    code,
 		Message: shortMessage(fmt.Sprintf("Failed to %s: %s", what, msg)),
@@ -581,12 +600,7 @@ func invalidArguments(next mcp.MethodHandler) mcp.MethodHandler {
 		if call, ok := req.(*mcp.CallToolRequest); ok && call.Params != nil && call.Params.Name != "" {
 			tool = call.Params.Name
 		}
-		replacement := render.ErrorResult(render.Error{
-			Code:    render.CodeInvalidInput,
-			Message: shortMessage("Invalid arguments: " + argumentProblem(res.GetError())),
-			Hint: fmt.Sprintf("Call %s again with arguments that match its input schema: every required "+
-				"argument, each of the listed type, and only listed values and argument names.", tool),
-		})
+		replacement := render.ErrorResult(invalidArgumentError(tool, res.GetError()))
 		// Edit the SDK's result in place: it keeps resultType in an unexported
 		// field of this object, and clients of the new protocol require it.
 		res.Content = replacement.Content
@@ -596,6 +610,17 @@ func invalidArguments(next mcp.MethodHandler) mcp.MethodHandler {
 			res.Meta = replacement.Meta
 		}
 		return res, nil
+	}
+}
+
+// invalidArgumentError is the invalid_input error an agent receives for
+// arguments the SDK refused; the error log records the same one.
+func invalidArgumentError(tool string, err error) render.Error {
+	return render.Error{
+		Code:    render.CodeInvalidInput,
+		Message: shortMessage("Invalid arguments: " + unknownArgumentAdvice(tool, argumentProblem(err))),
+		Hint: fmt.Sprintf("Call %s again with arguments that match its input schema: every required "+
+			"argument, each of the listed type, and only listed values and argument names.", tool),
 	}
 }
 

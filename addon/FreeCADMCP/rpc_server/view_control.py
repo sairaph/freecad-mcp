@@ -166,10 +166,24 @@ def _set_view_gui(doc_name: str | None, options: dict[str, Any]) -> dict[str, An
     if error is not None:
         return error
     kept, below = view_mode.isolation_scope([by_name[name] for name in isolate])
-    if focus_objects and not any(
-        view_mode.effective_visible(o, show, hide, isolate, kept, below) and view_mode._union_box([o]) is not None
-        for o in focus_objects
-    ):
+
+    def frameable(o: Any) -> bool:
+        if not view_mode.effective_visible(o, show, hide, isolate, kept, below):
+            return False
+        # An object hidden since its file loaded has no scene box until it is
+        # drawn, so one this call shows is measured after the change below, but
+        # only when it has a shape to draw: a sketch with no geometry, a
+        # spreadsheet or an origin line would fail that measure after the
+        # changes were made.
+        if o.Name in show or o.Name in isolate:
+            try:
+                if not o.Shape.isNull():
+                    return True
+            except Exception:
+                pass
+        return view_mode._union_box([o]) is not None
+
+    if focus_objects and not any(frameable(o) for o in focus_objects):
         return fail(
             INVALID_INPUT,
             "None of the focus objects has a shape on screen to frame.",

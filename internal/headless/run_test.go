@@ -266,10 +266,36 @@ func TestStartFailureIsReportedAndRemovesScript(t *testing.T) {
 	assertEmpty(t, dir)
 }
 
+// TestNonASCIIOutputAndPathSurviveACodePageStdout: a console code page that cannot hold the
+// text (cp1252 is what freecadcmd's pipes use on Windows) must not stop a script printing it, and
+// a script with a non-ASCII path runs and sees that path.
+func TestNonASCIIOutputAndPathSurviveACodePageStdout(t *testing.T) {
+	py := python(t)
+	scripts(t)
+	t.Setenv("PYTHONIOENCODING", "cp1252:strict")
+	const text = "café ≥ → 日本"
+	res := Run(context.Background(), "print('"+text+"')", 30, py)
+	if !res.Success || res.Output != text {
+		t.Fatalf("inline code: %+v", res)
+	}
+	file := filepath.Join(t.TempDir(), "dossier café ≥ 日本", "script ≥.py")
+	if err := os.MkdirAll(filepath.Dir(file), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(file, []byte("print(__file__)\nraise ValueError('≥ failed')\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	res = RunScript(context.Background(), Script{Path: file}, 30, py)
+	if res.Success || !strings.Contains(res.Output, file) || !strings.Contains(res.Output, "ValueError: ≥ failed") {
+		t.Fatalf("script file: %+v", res)
+	}
+}
+
 func TestPyString(t *testing.T) {
 	cases := map[string]string{
-		`C:\Users\me\script.py`: `'C:\\Users\\me\\script.py'`,
-		`/home/o'brien/s.py`:    `'/home/o\'brien/s.py'`,
+		`C:\Users\me\script.py`:  `'C:\\Users\\me\\script.py'`,
+		`/home/o'brien/s.py`:     `'/home/o\'brien/s.py'`,
+		"dossier café ≥ 日本/𝄞.py": `'dossier caf\` + `u00e9 \` + `u2265 \` + `u65e5\` + `u672c/\` + `U0001d11e.py'`,
 	}
 	for in, want := range cases {
 		if got := pyString(in); got != want {
