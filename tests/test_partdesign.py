@@ -597,3 +597,43 @@ def test_a_feature_leaves_its_body_before_it_is_deleted_and_other_objects_are_le
     assert removed == []
     pd.leave_body(doc, "Pad")
     assert removed == ["Pad"]
+
+
+# create_object and update_object also report the other top-level shapes they rebuilt.
+
+def _call_with_shape_changes(monkeypatch, make, call):
+    seen = {}
+    with load_object_factory(make) as factory:
+        monkeypatch.setattr(factory, "snapshot", lambda _doc: {"Before": 1})
+
+        def changed(doc, before, exclude=()):
+            seen["before"], seen["exclude"] = before, set(exclude)
+            return {"changed_shapes": [{"name": "Body", "shape": {"solids": 1}}], "changed_shapes_count": 1, "changed_shapes_truncated": False}
+
+        monkeypatch.setattr(factory, "changed_shapes", changed)
+        result = call(factory)
+    return result, seen
+
+
+def test_a_sketch_update_reports_the_body_it_rebuilt_but_not_itself(monkeypatch) -> None:
+    sketch = SketchObject(geometry=4)
+    doc = BodyDocument(sketch)
+    doc.Objects.append(sketch)
+    doc.body.Group.append(sketch)
+    result, seen = _call_with_shape_changes(monkeypatch, doc, lambda f: f.edit_object_gui("Doc", f.Object(name="Sketch", properties={})))
+    assert result["changed_shapes"][0]["name"] == "Body"
+    assert seen["before"] == {"Before": 1} and seen["exclude"] == {"Sketch"}
+
+
+def test_a_new_tip_excludes_its_own_body_too_and_a_failed_report_changes_nothing(monkeypatch) -> None:
+    pad = FakeObject(Name="Pad", TypeId="PartDesign::Pad")
+    doc = BodyDocument(pad)
+    result, seen = _call_with_shape_changes(monkeypatch, doc, lambda f: f.create_object_gui("Doc", f.Object(name="Pad", type="PartDesign::Pad", properties={})))
+    assert result["success"] is True and seen["exclude"] == {"Pad", "Body"}
+
+    pad = FakeObject(Name="Pad", TypeId="PartDesign::Pad")
+    doc = BodyDocument(pad)
+    with load_object_factory(doc) as factory:
+        monkeypatch.setattr(factory, "changed_shapes", _boom)
+        result = factory.create_object_gui("Doc", factory.Object(name="Pad", type="PartDesign::Pad", properties={}))
+    assert result["success"] is True and "changed_shapes" not in result

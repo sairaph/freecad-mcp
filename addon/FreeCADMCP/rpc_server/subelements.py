@@ -16,6 +16,14 @@ from rpc_server.serialize import finite_or_none, tight_bound_box
 
 SUBELEMENT_KINDS = ("faces", "edges", "all")
 
+#: The filters of list_subelements. ``curve``, ``along``, ``smooth`` and
+#: ``min_length`` filter edges, ``surface`` filters faces, ``on_bottom`` both.
+EDGE_FILTERS = ("curve", "along", "smooth", "min_length")
+FACE_FILTERS = ("surface",)
+FILTER_NAMES = EDGE_FILTERS + FACE_FILTERS + ("on_bottom",)
+_CURVES = ("line", "circle", "other")
+_SURFACES = ("plane", "cylinder", "cone", "sphere", "torus", "other")
+
 # Fixed budget: list_subelements takes no timeout argument.
 _TIMEOUT = 60.0
 
@@ -124,18 +132,67 @@ def _face_row(name: str, face: Any, Part: Any, lowest: float | None) -> dict[str
     return row
 
 
-def _edge_row(name: str, edge: Any, Part: Any, lowest: float | None, join: str | None = None) -> dict[str, Any]:
-    row: dict[str, Any] = {"name": name}
+def _edge_curve(edge: Any, Part: Any) -> tuple[Any, str]:
+    """The curve of ``edge`` and its kind: line, circle or other."""
     try:
         curve = edge.Curve
     except Exception:
         curve = None
     if isinstance(curve, (Part.Line, Part.LineSegment)):
-        kind = "line"
-    elif isinstance(curve, Part.Circle):
-        kind = "circle"
-    else:
-        kind = "other"
+        return curve, "line"
+    if isinstance(curve, Part.Circle):
+        return curve, "circle"
+    return curve, "other"
+
+
+def _along(edge: Any) -> str | None:
+    """The axis (x, y or z) a straight edge is parallel to, else None."""
+    try:
+        direction = edge.valueAt(edge.LastParameter) - edge.valueAt(edge.FirstParameter)
+        if direction.Length > 0:
+            direction.normalize()
+            for axis, value in zip("xyz", (direction.x, direction.y, direction.z)):
+                if abs(abs(value) - 1.0) < 1e-6:
+                    return axis
+    except Exception:
+        pass
+    return None
+
+
+def _face_matches(face: Any, filters: dict[str, Any], Part: Any, lowest: float | None) -> bool:
+    """Whether ``face`` passes the filters that apply to faces, cheapest first."""
+    if "surface" in filters:
+        try:
+            surface = face.Surface
+        except Exception:
+            surface = None
+        if _surface_kind(surface, Part) != filters["surface"]:
+            return False
+    if "on_bottom" in filters and _on_bottom(face, lowest) != filters["on_bottom"]:
+        return False
+    return True
+
+
+def _edge_matches(edge: Any, filters: dict[str, Any], Part: Any, lowest: float | None) -> bool:
+    """Whether ``edge`` passes every edge filter but ``smooth`` (which needs the
+    faces around it), cheapest first."""
+    if "min_length" in filters and edge.Length < filters["min_length"]:
+        return False
+    if "curve" in filters and _edge_curve(edge, Part)[1] != filters["curve"]:
+        return False
+    # Only a straight edge runs along an axis: the end points of an arc can line up with one.
+    if "along" in filters and (_edge_curve(edge, Part)[1] != "line" or _along(edge) != filters["along"]):
+        return False
+    if "on_bottom" in filters:
+        bottom = edge.Length >= _DEGENERATE_MM and _on_bottom(edge, lowest)
+        if bottom != filters["on_bottom"]:
+            return False
+    return True
+
+
+def _edge_row(name: str, edge: Any, Part: Any, lowest: float | None, join: str | None = None) -> dict[str, Any]:
+    row: dict[str, Any] = {"name": name}
+    curve, kind = _edge_curve(edge, Part)
     row["curve"] = kind
     row["length"] = _num(edge.Length)
     if edge.Length < _DEGENERATE_MM:
@@ -169,7 +226,40 @@ def _edge_row(name: str, edge: Any, Part: Any, lowest: float | None, join: str |
     return row
 
 
-def _list_subelements_gui(doc_name: str, obj_name: str, kind: str) -> dict[str, Any]:
+def check_filters(kind: str, filters: Any) -> tuple[dict[str, Any], dict[str, Any] | None]:
+    """The filters as given (None values dropped), or a fail() reply: an
+    unknown name or value, or a filter that cannot apply to ``kind``."""
+    if filters is None:
+        return {}, None
+    if not isinstance(filters, dict):
+        return {}, fail(INVALID_INPUT, f"filters must be an object, got {filters!r}")
+    given = {k: v for k, v in filters.items() if v is not None}
+    for name in given:
+        if name not in FILTER_NAMES:
+            return {}, fail(INVALID_INPUT, f"unknown filter {name!r}; the filters are {', '.join(FILTER_NAMES)}")
+    if kind == "faces":
+        for name in EDGE_FILTERS:
+            if name in given:
+                return {}, fail(INVALID_INPUT, f"{name} filters edges: use kind edges or all", "surface and on_bottom filter faces.")
+    if kind == "edges" and "surface" in given:
+        return {}, fail(INVALID_INPUT, "surface filters faces: use kind faces or all", "curve, along, smooth, min_length and on_bottom filter edges.")
+    number = given.get("min_length")
+    checks = (
+        ("curve", given.get("curve") in (None, *_CURVES), f"curve must be one of {', '.join(_CURVES)}"),
+        ("surface", given.get("surface") in (None, *_SURFACES), f"surface must be one of {', '.join(_SURFACES)}"),
+        ("along", given.get("along") in (None, "x", "y", "z"), "along must be x, y or z"),
+        ("on_bottom", isinstance(given.get("on_bottom", True), bool), "on_bottom must be true or false"),
+        ("smooth", isinstance(given.get("smooth", True), bool), "smooth must be true or false"),
+        ("min_length", number is None or (isinstance(number, (int, float)) and not isinstance(number, bool) and number >= 0),
+         "min_length must be a number of mm, 0 or more"),
+    )
+    for name, ok, message in checks:
+        if name in given and not ok:
+            return {}, fail(INVALID_INPUT, message)
+    return given, None
+
+
+def _list_subelements_gui(doc_name: str, obj_name: str, kind: str, filters: dict[str, Any]) -> dict[str, Any]:
     import Part
 
     from rpc_server.tessellation import shape_of
@@ -200,23 +290,35 @@ def _list_subelements_gui(doc_name: str, obj_name: str, kind: str) -> dict[str, 
     except Exception:
         lowest = None
     if kind in ("faces", "all"):
+        faces = list(shape.Faces)
+        result["face_count"] = len(faces)
         result["faces"] = [
-            _face_row(f"Face{i}", face, Part, lowest) for i, face in enumerate(shape.Faces, 1)
+            _face_row(f"Face{i}", face, Part, lowest)
+            for i, face in enumerate(faces, 1)
+            if _face_matches(face, filters, Part, lowest)
         ]
     if kind in ("edges", "all"):
         faces = shape.Faces
+        edges = list(shape.Edges)
+        result["edge_count"] = len(edges)
         held = _edge_faces(faces)
-        result["edges"] = [
-            _edge_row(
-                f"Edge{i}", edge, Part, lowest,
-                None if edge.Length < _DEGENERATE_MM else _join_kind(faces, edge, held),
-            )
-            for i, edge in enumerate(shape.Edges, 1)
-        ]
+        rows = []
+        for i, edge in enumerate(edges, 1):
+            if not _edge_matches(edge, filters, Part, lowest):
+                continue
+            # The join of an edge (smooth, seam) costs the most, so it is looked
+            # at last, and only for an edge that passed every other filter.
+            join = None if edge.Length < _DEGENERATE_MM else _join_kind(faces, edge, held)
+            if "smooth" in filters and (join is not None) != filters["smooth"]:
+                continue
+            rows.append(_edge_row(f"Edge{i}", edge, Part, lowest, join))
+        result["edges"] = rows
+    if filters:
+        result["filters"] = filters
     return result
 
 
-def list_subelements(doc_name: str, obj_name: str, kind: str = "faces") -> dict[str, Any]:
+def list_subelements(doc_name: str, obj_name: str, kind: str = "faces", filters: Any = None) -> dict[str, Any]:
     """List the faces and/or edges of ``obj_name``.
 
     ``kind`` is "faces", "edges" or "all". Reply: ``{"success", "document",
@@ -231,12 +333,21 @@ def list_subelements(doc_name: str, obj_name: str, kind: str = "faces") -> dict[
     it), "seam"? (true for the second kind), "on_bottom"?}]}``.
     Units are millimetres and square millimetres. GUI thread, 60 s. No
     transaction.
+
+    ``filters`` ({"curve", "surface", "along", "on_bottom", "smooth",
+    "min_length"}) keep only the matching rows; the rows of the others are
+    never built. The reply then also has "filters", and "face_count" and
+    "edge_count" (always sent) hold the totals, so the matched count is the
+    length of the list.
     """
     if kind not in SUBELEMENT_KINDS:
         return fail(
             INVALID_INPUT,
             f"invalid kind: {kind!r}; kind must be one of {', '.join(SUBELEMENT_KINDS)}",
         )
+    given, error = check_filters(kind, filters)
+    if error is not None:
+        return error
     return run_on_gui(
-        lambda: _list_subelements_gui(doc_name, obj_name, kind), _TIMEOUT, "list_subelements"
+        lambda: _list_subelements_gui(doc_name, obj_name, kind, given), _TIMEOUT, "list_subelements"
     )

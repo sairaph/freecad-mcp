@@ -41,18 +41,21 @@ def snapshot(doc: Any) -> dict[str, int | None] | None:
         return None
 
 
-def changed_shapes(doc: Any, before: dict[str, int | None] | None) -> dict[str, Any]:
+def changed_shapes(doc: Any, before: dict[str, int | None] | None, exclude: Any = ()) -> dict[str, Any]:
     """``{"changed_shapes": [{"name", "shape"}], "changed_shapes_count",
     "changed_shapes_truncated"}`` for the top-level objects whose shape changed
     since ``before`` (an object that is new counts), or ``{}`` when none did
-    or it could not be read."""
+    or it could not be read. ``exclude`` names objects to leave out, such as
+    the one a create_object or update_object call is about, which has its own
+    Shape line."""
     if before is None:
         return {}
     try:
+        skip = set(exclude)
         changed = {
             str(obj.Name): obj
             for obj in doc.Objects
-            if (sig := _signature(obj)) is not None and before.get(str(obj.Name)) != sig
+            if str(obj.Name) not in skip and (sig := _signature(obj)) is not None and before.get(str(obj.Name)) != sig
         }
         if not changed:
             return {}

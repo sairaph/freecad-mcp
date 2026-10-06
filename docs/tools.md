@@ -298,6 +298,14 @@ transaction already open in FreeCAD, the new objects are removed by hand), and
 the error ends with "Nothing was created." An object that was created but
 does not compute stays and the reply names it, as above.
 
+A property the object does not have (in `create_object` and in `update_object`) is
+refused with `Part::Box 'B' has no property 'Lenght'. Nearest properties: Length, Height.`:
+the nearest of the object's own non-hidden properties by edit distance (a swap of two letters
+counts one; at most 3, within a third of the name's length). Two cases name the type that has
+the property instead: `Shapes` on `Part::Common`, `Part::Cut` or `Part::Fuse` (they take `Base`
+and `Tool`; `Part::MultiCommon` and `Part::MultiFuse` take `Shapes`), and `Base` or `Tool` on a
+Multi boolean (the reverse). A name nothing is near says `get_object` lists the properties.
+
 A `Fem::ConstraintForce` acts along the outward normal of its first face (or
 along its `Direction` link when set) and a `Fem::ConstraintPressure` acts into
 its face; `Reversed` true flips either. A load with no face referenced yet
@@ -374,14 +382,16 @@ lists its edges, and the reply names a source object it hid, as for
 
 ### Shape changes
 
-`undo`, `redo`, `recompute_document`, `update_spreadsheet_cells` and
-`delete_object` list the shapes they changed: for each top-level object (one
+`undo`, `redo`, `recompute_document`, `update_spreadsheet_cells`, `delete_object`,
+`create_object` and `update_object` list the shapes they changed: for each top-level object (one
 no other object's tree node claims, so a Body counts once and its features not
 at all) whose shape changed during the call, `Shapes now: <name>: <shape>` in
 the `Shape:` format of `create_object` (several objects are listed one per
 line; the JSON has `changed_shapes`, `changed_shapes_count` and
 `changed_shapes_truncated`, capped at 200 like the invalid rows). A call that
-rebuilt nothing says nothing. Detection reads one hash of each object's shape
+rebuilt nothing says nothing. `create_object` and `update_object` leave out their own
+object, and the Body when the object is its Tip, because the reply already has their `Shape:` line; so a
+sketch changed under a Pad reports `Shapes now: Body: 1 solid, 60 x 40 x 4 mm, volume 9600.0 mm^3`. Detection reads one hash of each object's shape
 before and after (O(1) each, no volume or topology walk) and only the changed
 top-level objects get a summary. Measured on a document of 100 bored blocks
 and their compound (101 objects, 700 faces): taking the snapshot 1.9 ms, a no-op
@@ -509,6 +519,21 @@ the document and changes nothing.
 - `doc_name` (string, required)
 - `obj_name` (string, required)
 - `kind` (string, default `"faces"`, one of `faces`, `edges`, `all`).
+- Filters, all optional, applied inside FreeCAD before the rows are built (a mesh-derived solid of a knob
+  has 1294 edges, 141 kB, 428 of them on the bottom):
+  - `curve` (`line`, `circle`, `other`): keep edges of that curve type.
+  - `surface` (`plane`, `cylinder`, `cone`, `sphere`, `torus`, `other`): keep faces of that surface type.
+  - `along` (`x`, `y`, `z`): keep straight edges parallel to that axis.
+  - `on_bottom` (boolean): `true` keeps only what lies wholly on the bottom, `false` leaves it out.
+  - `smooth` (boolean): `false` leaves smooth and seam edges out (the ones FreeCAD cannot fillet), `true` keeps only them.
+  - `min_length` (number, mm): keep edges at least that long.
+
+`curve`, `along`, `smooth` and `min_length` filter edges and `surface` filters faces; `on_bottom` filters both.
+A filter for the other kind is refused with `kind` faces or edges and applies only to its own list with `all`.
+The frontmatter keeps the total as `faces` and `edges` and adds `faces_matched` and `edges_matched`; with no
+filter the reply is unchanged. Nothing matching says `No edges match the filters (the shape has 12).` The join
+that makes an edge `smooth` is the costly part of the edge list, so it is worked out only for edges that passed
+every other filter.
 
 The reply is a table per kind, in global coordinates, lengths in mm and areas
 in mm^2. Each face row gives its name (`Face1`), surface type (`plane`,
@@ -582,8 +607,9 @@ to STEP can work with.
   `obj_name` followed by `_solid`.
 - `tolerance` (number, default 0.1, up to 10 mm): distance within which mesh
   edges are sewn together.
-- `refine` (boolean, default `false`): merge coplanar triangles into larger
-  faces, slower but lighter to model on.
+- `refine` (boolean, default `false`): merge coplanar triangles on flat
+  regions into larger faces, slower. Curved surfaces stay one face per
+  triangle (a knob kept 428 faces, a sphere of 5024 triangles stays 5024).
 - `force` (boolean, default `false`): convert meshes over 200000 facets, which
   can take minutes and much memory.
 - `include_screenshot`, `view_name`: see [screenshot options](#screenshot-options).
@@ -595,7 +621,12 @@ afterwards; `refine` adds time on top of the conversion itself, in exchange
 for a solid with far fewer faces to fillet, boolean or export later. A mesh
 that is not closed gives a shell, not a solid; run `analyze_mesh` and
 `repair_mesh` first. Over 200000 facets without `force` is a conflict error
-with a hint to retry with `force` true. The mesh object is kept.
+with a hint to retry with `force` true. The mesh object is kept, and still
+shown: the reply says so (`source_visible` in the JSON) with the call that hides it, because a shown source
+mesh is exported and checked with the solid unless `object_names` is passed. The reply gives the face count and,
+for `refine`, says that it merged only flat regions, so `Part::Fillet` and `Part::Chamfer` on the curved edges are
+not practical; round such a solid with a cut tool (measured: a ring minus a cone cut from a cylinder removes
+30.3687 mm^3 of a 10 mm radius rim, exactly the chamfer volume).
 
 ### `solid_to_mesh`
 

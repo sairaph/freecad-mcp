@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/sairaph/mcp-wizard/render"
 )
@@ -41,6 +42,37 @@ type listSubelementsInput struct {
 	DocName string `json:"doc_name"`
 	ObjName string `json:"obj_name"`
 	Kind    string `json:"kind,omitempty"`
+	// The filters, applied in FreeCAD before the rows are built.
+	Curve     *string  `json:"curve,omitempty"`
+	Surface   *string  `json:"surface,omitempty"`
+	Along     *string  `json:"along,omitempty"`
+	OnBottom  *bool    `json:"on_bottom,omitempty"`
+	Smooth    *bool    `json:"smooth,omitempty"`
+	MinLength *float64 `json:"min_length,omitempty"`
+}
+
+// filters collects the filters that were given.
+func (in listSubelementsInput) filters() map[string]any {
+	out := map[string]any{}
+	if in.Curve != nil {
+		out["curve"] = *in.Curve
+	}
+	if in.Surface != nil {
+		out["surface"] = *in.Surface
+	}
+	if in.Along != nil {
+		out["along"] = *in.Along
+	}
+	if in.OnBottom != nil {
+		out["on_bottom"] = *in.OnBottom
+	}
+	if in.Smooth != nil {
+		out["smooth"] = *in.Smooth
+	}
+	if in.MinLength != nil {
+		out["min_length"] = *in.MinLength
+	}
+	return out
 }
 
 type subelementsFront struct {
@@ -49,6 +81,9 @@ type subelementsFront struct {
 	Kind     string `yaml:"kind"`
 	Faces    *int   `yaml:"faces,omitempty"`
 	Edges    *int   `yaml:"edges,omitempty"`
+	// With filters, Faces and Edges stay the totals and these are the rows listed.
+	FacesMatched *int `yaml:"faces_matched,omitempty"`
+	EdgesMatched *int `yaml:"edges_matched,omitempty"`
 }
 
 func (s *Server) registerInspectTools() {
@@ -56,7 +91,7 @@ func (s *Server) registerInspectTools() {
 	addTool(s.mcpServer, "measure", schema, s.measure)
 	addTool(s.mcpServer, "get_selection", inputSchema[getSelectionInput](nil), s.getSelection)
 	addTool(s.mcpServer, "list_subelements",
-		withEnum(inputSchema[listSubelementsInput](map[string]string{"kind": `"faces"`}), "kind", "faces", "edges", "all"), s.listSubelements)
+		listSubelementsSchema(), s.listSubelements)
 }
 
 // refLabel names a ref the way a person would type it back: the object name,
@@ -134,7 +169,8 @@ func (s *Server) listSubelements(ctx context.Context, _ *mcp.CallToolRequest, in
 	if err != nil {
 		return failure(ctx, "list subelements", err, ""), nil, nil
 	}
-	res, err := conn.ListSubelements(ctx, in.DocName, in.ObjName, kind)
+	filters := in.filters()
+	res, err := conn.ListSubelements(ctx, in.DocName, in.ObjName, kind, filters)
 	if err != nil {
 		return s.withNotice(failure(ctx, "list subelements", err, "")), nil, nil
 	}
@@ -147,24 +183,42 @@ func (s *Server) listSubelements(ctx context.Context, _ *mcp.CallToolRequest, in
 	if faces, ok := res["faces"].([]any); ok {
 		n := len(faces)
 		front.Faces = &n
-		body.WriteString(subelementTable("faces", "surface", "area mm^2", faces, faceDetails))
+		if total, ok := res["face_count"].(int64); ok && len(filters) > 0 {
+			front.Faces, front.FacesMatched = intPtr(int(total)), &n
+		}
+		body.WriteString(subelementTable("faces", "surface", "area mm^2", faces, faceDetails, noRowsText("faces", res["face_count"], filters)))
 	}
 	if edges, ok := res["edges"].([]any); ok {
 		n := len(edges)
 		front.Edges = &n
+		if total, ok := res["edge_count"].(int64); ok && len(filters) > 0 {
+			front.Edges, front.EdgesMatched = intPtr(int(total)), &n
+		}
 		if body.Len() > 0 {
 			body.WriteString("\n")
 		}
-		body.WriteString(subelementTable("edges", "curve", "length mm", edges, edgeDetails))
+		body.WriteString(subelementTable("edges", "curve", "length mm", edges, edgeDetails, noRowsText("edges", res["edge_count"], filters)))
 	}
 	body.WriteString("\nPass a name as a measure ref's sub, or in a References entry such as {\"object_name\": " +
 		fmt.Sprintf("%q", in.ObjName) + ", \"face\": \"Face1\"}.")
 	return s.withNotice(render.SuccessResult(front, body.String())), nil, nil
 }
 
+func intPtr(n int) *int { return &n }
+
+// listSubelementsSchema is the input schema of list_subelements with the enums of its filters.
+func listSubelementsSchema() *jsonschema.Schema {
+	s := inputSchema[listSubelementsInput](map[string]string{"kind": `"faces"`})
+	s = withEnum(s, "kind", "faces", "edges", "all")
+	s = withEnum(s, "curve", "line", "circle", "other")
+	s = withEnum(s, "surface", "plane", "cylinder", "cone", "sphere", "torus", "other")
+	s = withEnum(s, "along", "x", "y", "z")
+	return s
+}
+
 // subelementTable renders rows (the addon's face or edge dicts) as a markdown
 // table with name, the type column, the size column and a details column.
-func subelementTable(what, typeHeader, sizeHeader string, rows []any, details func(map[string]any) string) string {
+func subelementTable(what, typeHeader, sizeHeader string, rows []any, details func(map[string]any) string, none string) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "| %s | %s | %s | details |\n|---|---|---|---|\n", strings.TrimSuffix(what, "s"), typeHeader, sizeHeader)
 	for _, item := range rows {
@@ -183,7 +237,7 @@ func subelementTable(what, typeHeader, sizeHeader string, rows []any, details fu
 		fmt.Fprintf(&b, "| %s | %s | %s | %s |\n", str(row, "name"), str(row, typeKey), formatNumber(size), details(row))
 	}
 	if len(rows) == 0 {
-		fmt.Fprintf(&b, "\nThe shape has no %s.\n", what)
+		b.WriteString("\n" + none + "\n")
 	}
 	return b.String()
 }
@@ -300,4 +354,12 @@ func (s *Server) getSelection(ctx context.Context, _ *mcp.CallToolRequest, in ge
 
 	out := render.SuccessResult(front, body.String())
 	return s.withNotice(out), nil, nil
+}
+
+// noRowsText says why a table has no rows: the shape has none, or none match the filters.
+func noRowsText(what string, total any, filters map[string]any) string {
+	if n, ok := total.(int64); ok && len(filters) > 0 && n > 0 {
+		return fmt.Sprintf("No %s match the filters (the shape has %d).", what, n)
+	}
+	return fmt.Sprintf("The shape has no %s.", what)
 }

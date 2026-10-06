@@ -1064,10 +1064,10 @@ class FreeCADRPC:
 
         return set_view(doc_name, options)
 
-    def list_subelements(self, doc_name, obj_name, kind="faces") -> dict[str, Any]:
+    def list_subelements(self, doc_name, obj_name, kind="faces", filters=None) -> dict[str, Any]:
         from rpc_server.subelements import list_subelements
 
-        return list_subelements(doc_name, obj_name, kind)
+        return list_subelements(doc_name, obj_name, kind, filters)
 
     def measure(self, doc_name, kind, refs) -> dict[str, Any]:
         from rpc_server.measure import measure

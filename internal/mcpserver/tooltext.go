@@ -210,8 +210,16 @@ var toolTexts = map[string]toolText{
 		Params:      map[string]string{"include_screenshot": noScreenshotText},
 	},
 	"list_subelements": {
-		Description: `List the faces and edges of an object so you can pick sub-elements for measure and FEM References. Per face: name (Face1), surface type (plane, cylinder, cone, sphere, torus, other), area, centre, and normal (planes) or radius and axis (cylinders, spheres). Per edge: name (Edge1), curve type (line, circle, other), length, start and end points, along x, y or z for a line parallel to an axis (else its direction), and radius and centre (circles). A face or edge lying wholly at the shape's lowest z says "on the bottom"; an edge with no length says "degenerate", and one whose faces meet without a corner (or a seam) says "smooth": never pick either to fillet or chamfer. Coordinates are global, in mm. Call it instead of guessing face numbers. Read-only.`,
-		Params:      map[string]string{"kind": "which sub-elements to list (default faces)"},
+		Description: `List the faces and edges of an object so you can pick sub-elements for measure and FEM References. Per face: name (Face1), surface type (plane, cylinder, cone, sphere, torus, other), area, centre, and normal (planes) or radius and axis (cylinders, spheres). Per edge: name (Edge1), curve type (line, circle, other), length, start and end points, along x, y or z for a line parallel to an axis (else its direction), and radius and centre (circles). A face or edge lying wholly at the shape's lowest z says "on the bottom"; an edge with no length says "degenerate", and one whose faces meet without a corner (or a seam) says "smooth": never pick either to fillet or chamfer. Coordinates are global, in mm. Filters keep only matching rows (a mesh-derived solid has thousands of edges); the reply keeps the totals. Call it instead of guessing face numbers. Read-only.`,
+		Params: map[string]string{
+			"kind":       "which sub-elements to list (default faces)",
+			"curve":      "edges only: keep line, circle or other edges",
+			"surface":    "faces only: keep faces of this surface type",
+			"along":      "edges only: keep straight edges parallel to this axis",
+			"on_bottom":  "true keeps what lies on the bottom, false leaves it out",
+			"smooth":     "edges only: false leaves smooth and seam edges out, true keeps only them",
+			"min_length": "edges only: keep edges at least this long, in mm",
+		},
 	},
 	"create_object": {
 		Description: `Create one object in a document. Use the name the reply returns (Box may become Box001). The reply gives the shape (solids, size, volume) and the quantities set, warns of an empty result or a no-op Cut, and lists a fillet's edges and the objects that went hidden or failed. An error creates nothing; an object that fails to compute stays: fix or delete it.
@@ -226,7 +234,7 @@ FEM: create Fem::AnalysisPython first; pass analysis_name for its material, cons
 		},
 	},
 	"update_object": {
-		Description: `Set properties of an existing object: dimensions, Placement, links, expressions, colors. obj_properties follows the same rules as in create_object. The reply gives the shape now (solids, size, volume), warns of a result with no solid, lists each quantity it set with its unit, the edges now of a fillet or chamfer, and the objects that went hidden; names any other object the change made fail, and what was not rebuilt; check the rest with get_object.`,
+		Description: `Set properties of an existing object: dimensions, Placement, links, expressions, colors. obj_properties follows the same rules as in create_object. The reply gives the shape now (solids, size, volume), the other top-level shapes it rebuilt, warns of a result with no solid, lists each quantity it set with its unit, the edges now of a fillet or chamfer, and the objects that went hidden; names any other object the change made fail, and what was not rebuilt; check the rest with get_object.`,
 		Params:      map[string]string{"obj_properties": objPropsText},
 	},
 	"delete_object": {
@@ -378,12 +386,12 @@ FEM: create Fem::AnalysisPython first; pass analysis_name for its material, cons
 		},
 	},
 	"mesh_to_solid": {
-		Description: `Convert a mesh object into a new Part solid for booleans, fillets and STEP export; the mesh stays. Each triangle becomes a face: above 200000 facets pass force true, and refine merges coplanar faces. An open mesh gives a shell, not a solid: run analyze_mesh and repair_mesh first.`,
+		Description: `Convert a mesh object into a new Part solid for booleans, fillets and STEP export; the mesh stays. Each triangle becomes a face: above 200000 facets pass force true. refine merges only flat regions; curved surfaces stay one face per triangle, so fillet and chamfer edges on them are not practical (round with a cut tool). The reply gives the face count; the source mesh stays visible: hide it before check_printability or exporting. An open mesh gives a shell, not a solid: run analyze_mesh and repair_mesh first.`,
 		Params: map[string]string{
 			"obj_name":    "mesh object name (Mesh::Feature), as list_objects shows it",
 			"result_name": `name for the new Part object (default: obj_name + "_solid")`,
 			"tolerance":   "distance in mm within which edges are sewn (default 0.1)",
-			"refine":      "merge coplanar triangles into larger faces, slower (default false)",
+			"refine":      "merge coplanar triangles on flat regions, slower; curved faces stay triangles (default false)",
 			"force":       "convert meshes above 200000 facets, which can take minutes (default false)",
 			"timeout":     timeoutText(300),
 		},

@@ -3,7 +3,7 @@ name: freecad-mcp-guide
 description: Workflows and rules for the freecad MCP server's tools. Use when building or changing FreeCAD models through create_object and update_object, choosing faces or edges with list_subelements, setting values with units or expressions, setting up and running a FEM analysis, checking and exporting parts for 3D printing, designing printed fits, threads and clips for a print material such as PETG or PLA, working with files on the FreeCAD computer, or sharing one FreeCAD with other agents.
 metadata:
   generator: freecad-mcp
-  version: "0.4.20"
+  version: "0.4.21"
 ---
 
 # FreeCAD MCP guide
@@ -36,7 +36,7 @@ Call the tools of the freecad server by their bare names, such as create_object.
 Build a part:
 1. For a part that will be 3D printed and has holes, fits, threads or clips, read the material file for its material first, such as material-petg.md, and features.md for screw head recesses, cable channels and edges to round. Ask for the material when it is not known.
 2. create_object for each solid, with Placement and dimensions in obj_properties. For a part made of sketches, pads and pockets read partdesign.md and build it in a Body.
-3. create_object for booleans such as Part::Cut with Base and Tool as object names.
+3. create_object for booleans such as Part::Cut with Base and Tool as object names (Part::MultiFuse and Part::MultiCommon take Shapes, a list).
 4. recompute_document after a series of changes. Fix each failed object with update_object.
 5. get_object to check values. get_view to look at the result.
 6. save_document_as for a new file, save_document for an existing one.

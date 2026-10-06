@@ -274,6 +274,14 @@ func (s *Server) meshToSolid(ctx context.Context, _ *mcp.CallToolRequest, in mes
 			fmt.Fprintf(&body, " Volume %.4g mm^3.", vol)
 		}
 	}
+	if boolField(res, "refined") {
+		body.WriteString("\n\nRefine merged only flat regions: curved surfaces keep one face per triangle, so fillet and chamfer edges on them are not practical.")
+	} else if faces > 1 {
+		body.WriteString("\n\nEach triangle is a face; refine true would merge only flat regions, not curved ones.")
+	}
+	if boolField(res, "source_visible") {
+		fmt.Fprintf(&body, "\n\nThe source mesh '%s' stays visible. Hide it with update_object and {\"ViewObject\": {\"Visibility\": false}} before check_printability or exporting the default set, or pass object_names.", source)
+	}
 	for _, item := range warnings {
 		if text, ok := item.(string); ok {
 			fmt.Fprintf(&body, "\n- %s", text)

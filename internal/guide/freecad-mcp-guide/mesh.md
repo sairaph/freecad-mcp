@@ -6,6 +6,15 @@ Measure, patch and compare meshes with execute_code_headless. FreeCAD's Python h
 - A mesh is a tessellated design. A fit describes the tessellation, not a manufacturing tolerance.
 - Never convert a mesh to a solid to measure it. check_printability places a mesh by its bounding box.
 
+## Work on a solid made from a mesh
+
+mesh_to_solid gives a solid with one face per triangle. Booleans work on it; rounding does not.
+
+- Cut holes and slots with Part::Cut as on any solid.
+- refine merges only flat regions. Curved surfaces stay one face per triangle (a knob of 428 faces keeps them), so Part::Fillet and Part::Chamfer on those edges are not practical: list_subelements would show hundreds of edges and none picks out a clean curve. Round or chamfer the outside with a cut tool instead: for a chamfer on the bottom rim, cut away a ring minus a cone (a Part::Cylinder ring around the rim minus a Part::Cone) from the solid.
+- Filter list_subelements (curve, along, on_bottom, min_length) instead of reading every edge.
+- The source mesh and every earlier intermediate stay visible after a conversion or a cut. Hide them with update_object and {"ViewObject": {"Visibility": false}} before check_printability, or pass object_names to it and to export_document, so only the part counts.
+
 ## Measure a tessellated design
 
 Select the vertices of the region, fit the shape by least squares, then derive what the mesh lacks, such as the height of a cap a flat cut off a ball.
