@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"io"
 	"os"
@@ -223,17 +222,20 @@ func TestFinishWizardInstallsTheAddon(t *testing.T) {
 	dataDir := t.TempDir()
 	state := &AppState{}
 	state.Addon = addonState{Targets: []addoninstall.Target{{UserDataDir: dataDir}}, AutoStart: true}
-	var out bytes.Buffer
-	code := finishWizard(context.Background(), &out, state, false, 0)
-	if code != 0 {
-		t.Fatalf("code %d:\n%s", code, out.String())
+	sum := finishWizard(context.Background(), state, harness.Scope{}, false, 0)
+	if sum.Code != 0 {
+		t.Fatalf("code %d: %+v", sum.Code, sum.Rows)
 	}
 	target := addoninstall.Target{UserDataDir: dataDir}
 	if _, err := addoninstall.InstalledVersion(target); err != nil {
-		t.Fatalf("addon not installed: %v\n%s", err, out.String())
+		t.Fatalf("addon not installed: %v\n%+v", err, sum.Rows)
 	}
 	if !addoninstall.AutoStart(target) {
 		t.Fatal("auto-start not turned on")
+	}
+	row := rowByLabel(t, sum, "FreeCAD addon")
+	if !strings.HasPrefix(row.Status, "installed ") {
+		t.Fatalf("addon status = %q", row.Status)
 	}
 }
 
@@ -242,12 +244,27 @@ func TestFinishWizardDryRunWritesNothing(t *testing.T) {
 	dataDir := t.TempDir()
 	state := &AppState{}
 	state.Addon = addonState{Targets: []addoninstall.Target{{UserDataDir: dataDir}}, AutoStart: true}
-	var out bytes.Buffer
-	finishWizard(context.Background(), &out, state, true, 0)
+	sum := finishWizard(context.Background(), state, harness.Scope{}, true, 0)
 	if entries, _ := os.ReadDir(dataDir); len(entries) != 0 {
 		t.Fatalf("dry run wrote into the FreeCAD data directory: %v", entries)
 	}
-	if !strings.Contains(out.String(), "would install the FreeCAD addon") {
-		t.Fatalf("output:\n%s", out.String())
+	row := rowByLabel(t, sum, "FreeCAD addon")
+	if !strings.HasPrefix(row.Status, "would install ") {
+		t.Fatalf("addon status = %q", row.Status)
 	}
+	text := stripANSI(strings.Join(finishBody(newPalette(), sum, 100), "\n"))
+	if strings.Contains(text, dataDir) {
+		t.Fatalf("the finish screen shows the addon folder:\n%s", text)
+	}
+}
+
+func rowByLabel(t *testing.T, sum finishSummary, label string) statusRow {
+	t.Helper()
+	for _, r := range sum.Rows {
+		if r.Label == label {
+			return r
+		}
+	}
+	t.Fatalf("no %q row in %+v", label, sum.Rows)
+	return statusRow{}
 }

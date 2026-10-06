@@ -25,6 +25,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/sairaph/mcp-wizard/flow"
 	"github.com/sairaph/mcp-wizard/tui"
@@ -60,9 +61,11 @@ type shareState struct {
 	// not empty); the password screen shows it as "a password is set" and
 	// keeps it when Password is left empty, rather than removing it.
 	existingPassword string
-	// minutesText is the minutes screen's own editing buffer; TimeoutMinutes
-	// is only updated once it parses as a valid value.
-	minutesText string
+	// passwordInput and minutesInput are the text fields of the password and
+	// minutes screens; TimeoutMinutes is only updated once the text parses as
+	// a valid value.
+	passwordInput textinput.Model
+	minutesInput  textinput.Model
 	// message is the current validation error on the password or minutes
 	// screen, or "" before one.
 	message string
@@ -99,7 +102,7 @@ func (s *shareChoiceStep) ID() string { return "share-choice" }
 func (s *shareChoiceStep) Title(*AppState) string { return "Share this PC" }
 
 func (s *shareChoiceStep) Hints(*AppState) []struct{ Key, Label string } {
-	return []struct{ Key, Label string }{{"↑↓", "move"}, {"enter", "continue"}, {"esc", "back"}, {"q", "cancel"}}
+	return []struct{ Key, Label string }{{"space", "toggle"}, {"enter", "continue"}, {"esc", "back"}, {"q", "cancel"}}
 }
 
 func (s *shareChoiceStep) Init(state *AppState) tea.Cmd {
@@ -152,14 +155,14 @@ func (s *shareChoiceStep) Update(msg tea.Msg, state *AppState) (flow.Directive, 
 			state.Retreating = true
 			sh.Password = ""
 			return flow.Back, nil
-		case "up", "down", "k", "j", " ", "space", "left", "right":
+		case " ", "space":
 			sh.On = !sh.On
 		case "enter":
-			// While the settings file failed to read, Yes is refused: Asked
-			// would otherwise let applyShareChoice write the (unrelated)
-			// defaults over a file that failed to read for some other
-			// reason. No changes nothing when Initial is already false, so
-			// it may still proceed.
+			// While the settings file failed to read, turning sharing on is
+			// refused: Asked would otherwise let applyShareChoice write the
+			// (unrelated) defaults over a file that failed to read for some
+			// other reason. Off changes nothing when Initial is already
+			// false, so it may still proceed.
 			if sh.readErr && sh.On {
 				return flow.Continue, nil
 			}
@@ -170,28 +173,48 @@ func (s *shareChoiceStep) Update(msg tea.Msg, state *AppState) (flow.Directive, 
 	return flow.Continue, nil
 }
 
+// toggleRow is the wizard's toggle: the cursor, ○ or ● for the state, and the
+// label, the same row the addon step and the app's forms draw.
+func toggleRow(label string, on bool) string {
+	styles := tui.DefaultTheme.Styles()
+	mark := styles.Off.Render("○")
+	if on {
+		mark = styles.On.Render("●")
+	}
+	return " " + styles.Cursor.Render(">") + " " + mark + " " + label + "\n"
+}
+
+// wizardParagraph wraps text to the terminal width and indents it, for the
+// wizard's own screens.
+func wizardParagraph(state *AppState, text string) string {
+	return strings.Join(paragraph(text, screenSize{state.Width, state.Height}.width(), nil), "\n") + "\n"
+}
+
 func (s *shareChoiceStep) View(state *AppState) string {
 	theme := tui.DefaultTheme
 	sh := &state.Share
 	var b strings.Builder
-	b.WriteString("  Share this PC with other devices?\n\n")
-	b.WriteString("  Agents on other devices can then use FreeCAD on this computer, once freecad-mcp is\n")
-	b.WriteString("  installed on each of them too (every station installs it separately). A small\n")
-	b.WriteString("  listener starts with this computer and opens FreeCAD when a remote agent asks.\n\n")
-	if sh.On {
-		b.WriteString("    No, only agents on this computer use FreeCAD\n")
-		b.WriteString("  > Yes, share this PC with other devices\n")
-	} else {
-		b.WriteString("  > No, only agents on this computer use FreeCAD\n")
-		b.WriteString("    Yes, share this PC with other devices\n")
-	}
+	b.WriteString(wizardParagraph(state, "Let agents on other devices use FreeCAD on this computer."))
+	b.WriteString("\n")
+	b.WriteString(toggleRow("Share this PC with other devices", sh.On))
+	b.WriteString("\n")
+	b.WriteString(wizardParagraph(state, "Each of those devices needs freecad-mcp installed too. A small listener starts with this computer and opens FreeCAD when a remote agent asks."))
 	if sh.message != "" {
-		b.WriteString("\n  " + sh.message + "\n")
+		b.WriteString("\n" + wizardParagraph(state, sh.message))
 	}
 	b.WriteString(tui.Footer(theme, tui.Hints(theme,
-		tui.Hint{Key: "↑↓", Label: "move"}, tui.Hint{Key: "enter", Label: "continue"},
+		tui.Hint{Key: "space", Label: "toggle"}, tui.Hint{Key: "enter", Label: "continue"},
 		tui.Hint{Key: "esc", Label: "back"}, tui.Hint{Key: "q", Label: "cancel"})))
 	return tui.Section(theme, s.Title(state), b.String())
+}
+
+// shareInput starts a text field of the wizard's share steps.
+func shareInput(placeholder string, secret bool, value string) textinput.Model {
+	in := newTextField(newPalette(), placeholder, secret)
+	in.SetValue(value)
+	in.Width = 40
+	in.Focus()
+	return in
 }
 
 // --- Password ---
@@ -210,6 +233,12 @@ func (s *sharePasswordStep) Init(state *AppState) tea.Cmd {
 	if !state.Share.On {
 		return func() tea.Msg { return shareSkipMsg{} }
 	}
+	sh := &state.Share
+	placeholder := "none"
+	if sh.existingPassword != "" {
+		placeholder = "unchanged"
+	}
+	sh.passwordInput = shareInput(placeholder, true, sh.Password)
 	return nil
 }
 
@@ -235,40 +264,34 @@ func (s *sharePasswordStep) Update(msg tea.Msg, state *AppState) (flow.Directive
 		}
 		sh.message = ""
 		return flow.Next, nil
-	case "backspace":
-		sh.Password = trimLastRune(sh.Password)
-		sh.message = ""
-	default:
-		if len(k.Runes) > 0 {
-			sh.Password += string(k.Runes)
-			sh.message = ""
-		}
 	}
-	return flow.Continue, nil
+	var cmd tea.Cmd
+	sh.passwordInput, cmd = sh.passwordInput.Update(msg)
+	if sh.Password != sh.passwordInput.Value() {
+		sh.Password = sh.passwordInput.Value()
+		sh.message = ""
+	}
+	return flow.Continue, cmd
 }
 
 func (s *sharePasswordStep) View(state *AppState) string {
 	theme := tui.DefaultTheme
 	sh := &state.Share
 	var b strings.Builder
-	if sh.existingPassword != "" {
-		b.WriteString("  Password other devices must give. Leave it empty to keep the current one; remove it\n")
-		b.WriteString("  on the Share this PC page.\n")
-	} else {
-		b.WriteString("  Password other devices must give (optional; leave empty for none).\n")
-	}
-	b.WriteString("  The same password protects FreeCAD's RPC server on this computer, and agents here\n")
-	b.WriteString("  use it too. Without a password, anyone on an allowed IP address (or on this\n")
-	b.WriteString("  computer) can run code in FreeCAD. Connections are not encrypted: use this on a\n")
-	b.WriteString("  network you trust, or an SSH tunnel (see " + remoteAccessDocsURL + ").\n\n")
-	if sh.Password == "" && sh.existingPassword != "" {
-		b.WriteString("  Password: (a password is set; leave empty to keep it, type to replace it)\n")
-	} else {
-		fmt.Fprintf(&b, "  Password: %s\n", maskedFieldDisplay(sh.Password))
-	}
+	b.WriteString(wizardParagraph(state, "Password other devices must give (optional)."))
+	b.WriteString("\n")
+	b.WriteString("   Password  " + sh.passwordInput.View() + "\n")
 	if sh.message != "" {
-		b.WriteString("\n  " + sh.message + "\n")
+		b.WriteString("\n" + wizardParagraph(state, sh.message))
 	}
+	b.WriteString("\n")
+	help := "The same password protects FreeCAD on this computer, and agents here use it too. Without one, anyone on an allowed device can run code in FreeCAD."
+	if sh.existingPassword != "" {
+		help = "A password is set. Leave this empty to keep it, or type a new one. " + help
+	}
+	b.WriteString(wizardParagraph(state, help))
+	b.WriteString("\n")
+	b.WriteString(wizardParagraph(state, "Connections are not encrypted; see docs/remote-access.md for an SSH tunnel."))
 	b.WriteString(tui.Footer(theme, tui.Hints(theme,
 		tui.Hint{Key: "enter", Label: "continue"}, tui.Hint{Key: "esc", Label: "back"})))
 	return tui.Section(theme, s.Title(state), b.String())
@@ -291,9 +314,11 @@ func (s *shareMinutesStep) Init(state *AppState) tea.Cmd {
 		return func() tea.Msg { return shareSkipMsg{} }
 	}
 	sh := &state.Share
-	if sh.minutesText == "" {
-		sh.minutesText = strconv.Itoa(sh.TimeoutMinutes)
+	value := sh.minutesInput.Value()
+	if value == "" {
+		value = strconv.Itoa(sh.TimeoutMinutes)
 	}
+	sh.minutesInput = shareInput("30", false, value)
 	sh.message = ""
 	return nil
 }
@@ -314,7 +339,7 @@ func (s *shareMinutesStep) Update(msg tea.Msg, state *AppState) (flow.Directive,
 		state.Retreating = true
 		return flow.Back, nil
 	case "enter":
-		n, err := validateMinutes(sh.minutesText)
+		n, err := validateMinutes(sh.minutesInput.Value())
 		if err != nil {
 			sh.message = err.Error()
 			return flow.Continue, nil
@@ -322,33 +347,33 @@ func (s *shareMinutesStep) Update(msg tea.Msg, state *AppState) (flow.Directive,
 		sh.TimeoutMinutes = n
 		sh.message = ""
 		return flow.Next, nil
-	case "backspace":
-		sh.minutesText = trimLastRune(sh.minutesText)
-		sh.message = ""
-	default:
-		for _, r := range k.Runes {
-			if r >= '0' && r <= '9' {
-				sh.minutesText += string(r)
-			}
-		}
+	}
+	var cmd tea.Cmd
+	if kept, ok := digitsOnly(k); ok {
+		k = kept
+	} else {
+		return flow.Continue, nil
+	}
+	before := sh.minutesInput.Value()
+	sh.minutesInput, cmd = sh.minutesInput.Update(k)
+	if sh.minutesInput.Value() != before {
 		sh.message = ""
 	}
-	return flow.Continue, nil
+	return flow.Continue, cmd
 }
 
 func (s *shareMinutesStep) View(state *AppState) string {
 	theme := tui.DefaultTheme
 	sh := &state.Share
 	var b strings.Builder
-	b.WriteString("  How long to keep the session assigned to an agent?\n\n")
-	b.WriteString("  With remote access on, several agents may try to use FreeCAD at the same time. The\n")
-	b.WriteString("  session lock stops one agent from taking control while another works. Agents can\n")
-	b.WriteString("  free it themselves; after this long without activity it becomes available to\n")
-	b.WriteString("  another agent.\n\n")
-	fmt.Fprintf(&b, "  Minutes: %s_\n", sh.minutesText)
+	b.WriteString(wizardParagraph(state, "How long to keep the session assigned to an agent?"))
+	b.WriteString("\n")
+	b.WriteString("   Minutes  " + sh.minutesInput.View() + "\n")
 	if sh.message != "" {
-		b.WriteString("\n  " + sh.message + "\n")
+		b.WriteString("\n" + wizardParagraph(state, sh.message))
 	}
+	b.WriteString("\n")
+	b.WriteString(wizardParagraph(state, "With sharing on, several agents may try to use FreeCAD. After this long without activity the session becomes available to another agent."))
 	b.WriteString(tui.Footer(theme, tui.Hints(theme,
 		tui.Hint{Key: "enter", Label: "continue"}, tui.Hint{Key: "esc", Label: "back"})))
 	return tui.Section(theme, s.Title(state), b.String())

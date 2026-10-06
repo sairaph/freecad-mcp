@@ -21,12 +21,25 @@ import (
 	"github.com/sairaph/freecad-mcp/internal/xmlrpc"
 )
 
-// connectionReport checks the RPC server the MCP server would use.
+// connectionReport checks the RPC server the MCP server would use and prints
+// the results the way the doctor does. It returns 1 when a check failed.
 func connectionReport(ctx context.Context, w io.Writer) int {
+	results, code := connectionResults(ctx)
+	for _, r := range results {
+		tag := map[doctor.Status]string{doctor.OK: "[ok]", doctor.Warn: "[warn]", doctor.Fail: "[fail]"}[r.Status]
+		fmt.Fprintf(w, "  %-6s %s\n         %s\n", tag, r.Name, r.Detail)
+	}
+	return code
+}
+
+// connectionResults checks the RPC server the MCP server would use: one
+// result for the server, and one for whether the addon matches this server
+// when it answered. The code is 1 when a result failed.
+func connectionResults(ctx context.Context) ([]doctor.Result, int) {
+	const name = "FreeCAD RPC server"
 	settings, err := serverSettings(ctx)
 	if err != nil {
-		fmt.Fprintf(w, "  [fail] %v\n", err)
-		return 1
+		return []doctor.Result{{Name: name, Status: doctor.Fail, Detail: err.Error()}}, 1
 	}
 	// 10 s, not less: right after FreeCAD starts its GUI thread is still busy
 	// with startup Python, and a shorter bound was seen to time out here
@@ -36,26 +49,23 @@ func connectionReport(ctx context.Context, w io.Writer) int {
 	ok, err := conn.Ping(ctx)
 	if err != nil || !ok {
 		if down := listenerFreeCADDown(err); down {
-			fmt.Fprintf(w, "  [warn] FreeCAD is not running on %s; agents start it with start_freecad.\n", settings.Host)
-			return 0
+			return []doctor.Result{{Name: name, Status: doctor.Warn,
+				Detail: fmt.Sprintf("FreeCAD is not running on %s; agents start it with start_freecad", settings.Host)}}, 0
 		}
 		if fault, unreadable := settingsUnreadableFault(err); unreadable {
 			// FreeCAD is running (it answered with a fault, not silence or a
 			// refused connection); the fault's own text already carries the
 			// "save them again" advice (live check L4).
-			fmt.Fprintf(w, "  [fail] %s\n", fault)
-			return 1
+			return []doctor.Result{{Name: name, Status: doctor.Fail, Detail: fault}}, 1
 		}
-		fmt.Fprintf(w, "  [fail] FreeCAD RPC server at %s: %v\n", conn.URL(), rpcProblem(err))
-		return 1
+		return []doctor.Result{{Name: name, Status: doctor.Fail,
+			Detail: fmt.Sprintf("%s: %s", conn.URL(), rpcProblem(err))}}, 1
 	}
-	fmt.Fprintf(w, "  [ok]   FreeCAD RPC server at %s answers\n", conn.URL())
+	results := []doctor.Result{{Name: name, Status: doctor.OK, Detail: conn.URL() + " answers"}}
 	if warning, _ := conn.CheckAddonVersion(ctx, version); warning != "" {
-		fmt.Fprintf(w, "  [warn] %s\n", warning)
-		return 0
+		return append(results, doctor.Result{Name: "FreeCAD addon", Status: doctor.Warn, Detail: warning}), 0
 	}
-	fmt.Fprintln(w, "  [ok]   the addon matches this server")
-	return 0
+	return append(results, doctor.Result{Name: "FreeCAD addon", Status: doctor.OK, Detail: "matches this server"}), 0
 }
 
 func rpcProblem(err error) string {

@@ -145,7 +145,7 @@ func (c remoteFreeCADCheck) Run(ctx context.Context) doctor.Result {
 		return doctor.Result{Name: c.Name(), Status: doctor.Fail, Detail: where + " is not a freecad-mcp listener; update freecad-mcp there and turn on \"Share this PC\""}
 	case errors.Is(err, remote.ErrPasswordRequired):
 		return doctor.Result{Name: c.Name(), Status: doctor.Fail,
-			Detail: where + " asks for a password: use `freecad-mcp` > Connect to FreeCAD on another computer, " +
+			Detail: where + " asks for a password: use `freecad-mcp` > Use another computer, " +
 				"or run `freecad-mcp connect --host " + settings.Host + " --password-stdin`"}
 	}
 	var rerr *remote.Error

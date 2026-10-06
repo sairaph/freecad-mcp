@@ -50,7 +50,7 @@ const (
 		"operation is stuck; it answers even while the GUI thread is busy."
 	authHint = "FreeCAD asks for a password. On the computer running FreeCAD it is set in `" + domain.BinaryName +
 		"` > Share this PC, which also stores it for the agents there (restart the AI client to use a changed " +
-		"one). From another computer, use `" + domain.BinaryName + "` > Connect to FreeCAD on another computer, " +
+		"one). From another computer, use `" + domain.BinaryName + "` > Use another computer, " +
 		"or save it with `" + domain.BinaryName + " connect --host <host> --password-stdin`, or set " +
 		domain.EnvToken + " in the AI client's config for this server."
 	timeoutHint = "FreeCAD did not answer in time. Call get_rpc_status to see whether a GUI operation is " +

@@ -10,9 +10,7 @@ package main
 // placed.
 
 import (
-	"context"
 	"fmt"
-	"io"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -91,14 +89,13 @@ func (h harnessSelection) View(state *AppState) string {
 	if len(state.UntickedClients) == 0 || state.harnessDetecting {
 		return view
 	}
-	note := fmt.Sprintf("  %s already has a %q entry that setup did not write (edited by hand,\n"+
-		"  or another program's). It starts unticked so the entry is kept; ticking it replaces it.\n",
+	text := fmt.Sprintf("%s already has a %q entry that setup did not write (edited by hand, or another program's), so it starts unticked; ticking it replaces the entry.",
 		state.UntickedClients[0], h.name)
 	if len(state.UntickedClients) > 1 {
-		note = fmt.Sprintf("  %s already have a %q entry that setup did not write (edited by hand,\n"+
-			"  or another program's). They start unticked so the entries are kept; ticking one replaces it.\n",
+		text = fmt.Sprintf("%s already have a %q entry that setup did not write (edited by hand, or another program's), so they start unticked; ticking one replaces its entry.",
 			strings.Join(state.UntickedClients, ", "), h.name)
 	}
+	note := wizardParagraph(state, text)
 	// Above the footer, which is the last line.
 	if i := strings.LastIndex(view, "\n"); i >= 0 {
 		return view[:i] + "\n" + note + view[i:]
@@ -161,7 +158,13 @@ func (g applyGuard) Update(msg tea.Msg, state *AppState) (flow.Directive, tea.Cm
 	if k, ok := msg.(tea.KeyMsg); ok && k.String() == "ctrl+c" && !state.Results.Done && !g.dryRun {
 		return flow.Continue, nil
 	}
-	return g.Step.Update(msg, state)
+	d, cmd := g.Step.Update(msg, state)
+	// The finish screen reports the registration with the rest of setup, so
+	// the library's own result screen is not shown.
+	if d == flow.Continue && state.Results.Done {
+		return flow.Next, cmd
+	}
+	return d, cmd
 }
 
 // stepIndex returns the position of the step with the given ID, or -1.
@@ -205,50 +208,65 @@ func classifyWizard(base *flow.BaseState, runCode int, applyStarted, dryRun, sig
 	}
 }
 
-// finishWizard applies what the wizard recorded once registration ran, in
-// this order: the connection to FreeCAD on another computer or the share
-// settings, the addon, then the listener. With nothing to change for the
-// listener, a registered one is restarted so it runs this binary. It returns
-// the exit status.
-func finishWizard(ctx context.Context, w io.Writer, state *AppState, dryRun bool, registrationCode int) int {
-	code := registrationCode
-	code = max(code, applyConnectChoice(ctx, w, state, dryRun))
-	code = max(code, applyShareChoice(ctx, w, state, dryRun))
-	if !state.Connect.Chosen {
-		code = max(code, finishAddon(w, state.Addon, dryRun))
-	}
-	listenerCode, handled := applyShareListener(ctx, w, state, dryRun)
-	code = max(code, listenerCode)
-	if !handled && !dryRun {
-		code = max(code, restartListener(ctx, w))
-	}
-	return code
-}
-
 // restartListener is restartListenerIfRegistered, called through a variable
 // so tests can replace it and never restart a real listener.
 var restartListener = restartListenerIfRegistered
 
-// finishAddon installs the addon into every located target with the chosen
-// auto-start setting, or says FreeCAD was not found.
-func finishAddon(w io.Writer, a addonState, dryRun bool) int {
-	fmt.Fprintln(w, "\n  FreeCAD addon")
-	if len(a.Targets) == 0 {
-		fmt.Fprintln(w, freecadNotFound)
-		return 0
-	}
-	if dryRun {
-		for _, t := range a.Targets {
-			reportAddonDryRun(w, t)
-		}
-		return 0
-	}
-	var results []addonResult
-	for _, t := range a.Targets {
-		results = append(results, installAddon(t, a.AutoStart))
-	}
-	return reportAddonResults(w, results)
-}
-
 const interruptedMessage = "  Setup was interrupted while registering the AI clients, so some may be registered.\n" +
 	"  Run `" + domain.BinaryName + " install` to finish, or `" + domain.BinaryName + " uninstall --all` to remove everything."
+
+// chrome puts the screen of a wizard step into the frame the app's screens
+// have: the header on the first row (the library starts its screens with a
+// blank line) and the footer on the last row of the terminal, so it does not
+// float under the content.
+type chrome struct {
+	flow.Step[AppState]
+}
+
+func (c chrome) View(state *AppState) string {
+	return frameWizard(c.Step.View(state), screenSize{state.Width, state.Height})
+}
+
+// footerStarts are the first words of a footer line the library draws.
+var footerStarts = []string{"↑↓ ", "enter ", "esc ", "space ", "tab ", "q "}
+
+// looksLikeFooter reports whether line, ignoring colour, is a key hint line.
+func looksLikeFooter(line string) bool {
+	line = strings.TrimSpace(stripANSI(line))
+	if strings.Contains(line, " · ") {
+		return true
+	}
+	for _, start := range footerStarts {
+		if strings.HasPrefix(line, start) {
+			return true
+		}
+	}
+	return false
+}
+
+// frameWizard drops the blank lines around view, and, when its last line is a
+// footer and the terminal height is known, pads the content so the footer is
+// the last row (content that does not fit is cut at the bottom).
+func frameWizard(view string, size screenSize) string {
+	blank := func(l string) bool { return strings.TrimSpace(stripANSI(l)) == "" }
+	lines := strings.Split(view, "\n")
+	for len(lines) > 0 && blank(lines[0]) {
+		lines = lines[1:]
+	}
+	for len(lines) > 0 && blank(lines[len(lines)-1]) {
+		lines = lines[:len(lines)-1]
+	}
+	if len(lines) < 2 || size.h <= 0 || !looksLikeFooter(lines[len(lines)-1]) {
+		return strings.Join(lines, "\n")
+	}
+	footer := lines[len(lines)-1]
+	body := lines[:len(lines)-1]
+	for len(body) > 0 && blank(body[len(body)-1]) {
+		body = body[:len(body)-1]
+	}
+	body = body[:min(len(body), size.h-1)]
+	for len(body) < size.h-1 {
+		body = append(body, "")
+	}
+	return strings.Join(append(body, footer), "\n")
+}

@@ -198,6 +198,50 @@ func writeSkillFolder(dir string) error {
 	})
 }
 
+// skillKind is what installing the guide did, or would do, to one folder.
+type skillKind int
+
+const (
+	skillLeft    skillKind = iota // holds a skill freecad-mcp did not write
+	skillCurrent                  // already the embedded guide
+	skillWould                    // a dry run: would be written
+	skillWrote                    // written
+	skillFailed                   // could not be written
+)
+
+type skillResult struct {
+	Target string
+	Kind   skillKind
+	Err    error
+}
+
+// syncSkillFolders writes the guide into each folder of dirs (or, with dryRun,
+// says what it would write) and returns one result per folder, in order.
+func syncSkillFolders(dirs []string, dryRun bool) []skillResult {
+	var results []skillResult
+	for _, dir := range dirs {
+		target := filepath.Join(dir, guide.Name)
+		ours, exists := ownSkill(target)
+		r := skillResult{Target: target}
+		switch {
+		case exists && !ours:
+			r.Kind = skillLeft
+		case exists && skillIsCurrent(target):
+			r.Kind = skillCurrent
+		case dryRun:
+			r.Kind = skillWould
+		default:
+			if err := writeSkillFolder(target); err != nil {
+				r.Kind, r.Err = skillFailed, err
+			} else {
+				r.Kind = skillWrote
+			}
+		}
+		results = append(results, r)
+	}
+	return results
+}
+
 // installSkills writes the guide for ids' clients, printing one line per
 // folder. It returns an exit code: a folder that could not be written fails.
 // With prune, ids is every registered client, so a copy that freecad-mcp wrote
@@ -218,23 +262,19 @@ func installSkills(w io.Writer, scope harness.Scope, ids []harness.ID, dryRun, p
 	}
 	fmt.Fprintln(w, "\n  Guide skill")
 	code := 0
-	for _, dir := range dirs {
-		target := filepath.Join(dir, guide.Name)
-		ours, exists := ownSkill(target)
-		switch {
-		case exists && !ours:
-			fmt.Fprintf(w, "  [skip] %s holds a skill that freecad-mcp did not write; it is left as it is.\n", target)
-		case exists && skillIsCurrent(target):
-			fmt.Fprintf(w, "  [ok]   guide skill already current: %s\n", target)
-		case dryRun:
-			fmt.Fprintf(w, "  [ok]   would write the guide skill to %s\n", target)
+	for _, r := range syncSkillFolders(dirs, dryRun) {
+		switch r.Kind {
+		case skillLeft:
+			fmt.Fprintf(w, "  [skip] %s holds a skill that freecad-mcp did not write; it is left as it is.\n", r.Target)
+		case skillCurrent:
+			fmt.Fprintf(w, "  [ok]   guide skill already current: %s\n", r.Target)
+		case skillWould:
+			fmt.Fprintf(w, "  [ok]   would write the guide skill to %s\n", r.Target)
+		case skillFailed:
+			fmt.Fprintf(w, "  [fail] %s: %v\n", r.Target, r.Err)
+			code = 1
 		default:
-			if err := writeSkillFolder(target); err != nil {
-				fmt.Fprintf(w, "  [fail] %s: %v\n", target, err)
-				code = 1
-				continue
-			}
-			fmt.Fprintf(w, "  [ok]   wrote the guide skill to %s\n", target)
+			fmt.Fprintf(w, "  [ok]   wrote the guide skill to %s\n", r.Target)
 		}
 	}
 	if prune && len(dirs) > 0 {

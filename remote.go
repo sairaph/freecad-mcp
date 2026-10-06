@@ -30,12 +30,6 @@ import (
 	"github.com/sairaph/freecad-mcp/internal/remote"
 )
 
-// remoteAccessDocsURL is where the wizard and the app pages point the user
-// for the remote access guide (an SSH tunnel, encryption, the session lock):
-// a path in the repository ("docs/remote-access.md") that an installed user
-// does not have, so every reference uses the hosted page instead.
-const remoteAccessDocsURL = "https://github.com/sairaph/freecad-mcp/blob/main/docs/remote-access.md"
-
 // hostPort renders host and port for user text the way every address in
 // this program is shown: net.JoinHostPort brackets an IPv6 host ("[::1]:9876"),
 // where a plain "%s:%d" would read as "::1:9876", ambiguous with a longer
@@ -79,15 +73,6 @@ func protocolWarningLine(st listenerapi.Status) string {
 		"[warn] That computer runs freecad-mcp %s (protocol %d); this one runs %s (protocol %d). "+
 			"Update the older one.",
 		st.Version, st.Protocol, version, domain.ProtocolVersion)
-}
-
-// maskValue turns a password into asterisks for display, one per rune, so
-// its length is not misleading for a multi-byte character. The app's Share
-// and Connect pages both call it; the install wizard's own maskedFieldDisplay
-// (wizard_connect.go) uses it too, adding the wizard's unconditional trailing
-// cursor mark on top.
-func maskValue(s string) string {
-	return strings.Repeat("*", len([]rune(s)))
 }
 
 // notListenerLine renders the message for remote.ErrNotListener, shared by
@@ -190,16 +175,28 @@ func applyShare(ctx context.Context, w io.Writer, targets []addoninstall.Target,
 // (the `share` command) and the install wizard's applyShareListenerOn
 // (wizard_share.go) so the message exists once.
 func shareOnResultLine(w io.Writer, port int, allowedIPs string) {
-	fmt.Fprintf(w, "  [ok] Remote access on: other devices connect to %s; allowed: %s\n",
-		shareAddressLine(port), allowedIPs)
-	if prefixes, err := domain.ParseAllowedIPs(allowedIPs); err == nil && domain.LoopbackOnly(prefixes) {
-		fmt.Fprintln(w, "  Only this computer (or an SSH tunnel) may connect; no LAN subnet was set or detected.")
+	notes := shareOnNotes(port, allowedIPs)
+	fmt.Fprintf(w, "  [ok] %s\n", notes[0])
+	for _, n := range notes[1:] {
+		fmt.Fprintln(w, "  "+n)
 	}
-	fmt.Fprintln(w, "  Change which devices may connect in freecad-mcp > Share this PC > Advanced.")
+}
+
+// shareOnNotes says what turning sharing on did: where other devices
+// connect and which may, then the notes that go with it. It is the text of
+// shareOnResultLine and of the wizard's finish screen.
+func shareOnNotes(port int, allowedIPs string) []string {
+	notes := []string{fmt.Sprintf("Remote access on: other devices connect to %s; allowed: %s",
+		shareAddressLine(port), allowedIPs)}
+	if prefixes, err := domain.ParseAllowedIPs(allowedIPs); err == nil && domain.LoopbackOnly(prefixes) {
+		notes = append(notes, "Only this computer (or an SSH tunnel) may connect; no LAN subnet was set or detected.")
+	}
+	notes = append(notes, "Change which devices may connect in freecad-mcp > Share this PC > Advanced.")
 	if runtime.GOOS == "windows" {
-		fmt.Fprintln(w, "  Windows may ask whether to allow freecad-mcp. Allow it for the network type this "+
+		notes = append(notes, "Windows may ask whether to allow freecad-mcp. Allow it for the network type this "+
 			"computer uses (Private or Public), or other devices cannot connect.")
 	}
+	return notes
 }
 
 // applyShareSettings writes opts into every target's addon settings and
@@ -263,7 +260,7 @@ func applyShareSettings(ctx context.Context, w io.Writer, targets []addoninstall
 		ok = false
 	case storedHost != "":
 		fmt.Fprintf(w, "  [note] Agents on this computer use FreeCAD on %s. To use this computer's "+
-			"FreeCAD instead, open Connect and press d.\n", storedHost)
+			"FreeCAD instead, open Use another computer and choose Use this computer instead.\n", storedHost)
 	default:
 		if err := setCredentialToken(ctx, opts.Password); err != nil {
 			fmt.Fprintf(w, "  [fail] store the password: %v\n", err)

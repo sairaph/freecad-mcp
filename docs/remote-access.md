@@ -5,9 +5,9 @@
 By default FreeCAD MCP only talks to FreeCAD on the same machine. Remote
 access lets an AI client on one computer control FreeCAD running on another:
 install freecad-mcp on both, turn "Share this PC" on where FreeCAD runs, then
-use "Connect to FreeCAD on another computer" everywhere else.
+use "Use another computer" everywhere else.
 
-## What Share this PC and Connect do
+## What Share this PC and Use another computer do
 
 - **Share this PC**, on the computer that runs FreeCAD, turns on a small
   listener that other devices can reach, sets which IP addresses may connect
@@ -15,7 +15,7 @@ use "Connect to FreeCAD on another computer" everywhere else.
   (run with no arguments in a terminal) or from the install wizard's own step
   (which leaves the allowed addresses to the automatic choice); the
   one-shot command is `freecad-mcp share`.
-- **Connect to FreeCAD on another computer**, on every other computer, points
+- **Use another computer**, on every other computer, points
   that computer's freecad-mcp at the shared one: host, port and password. AI
   clients on that computer then reach FreeCAD through the listener instead of
   a local addon. Open it the same way; the one-shot command is
@@ -61,7 +61,7 @@ FreeCAD computer:
 
 | Setting | Default | Meaning |
 | --- | --- | --- |
-| Allowed IPs | the saved list, else the local network's subnet found from this computer's own address (127.0.0.1 when no network is found) | Comma-separated IP addresses or CIDR subnets allowed to connect. Loopback addresses (127.0.0.1, ::1) are always allowed in addition to this list, whatever it says. The install wizard sets it without asking; change it in Share this PC > Advanced (a collapsed row showing the allowed devices and the port; space or enter expands it into the Allowed IPs and Port fields), or with `freecad-mcp share --allowed-ips`. |
+| Allowed IPs | the saved list, else the local network's subnet found from this computer's own address (127.0.0.1 when no network is found) | Comma-separated IP addresses or CIDR subnets allowed to connect. Loopback addresses (127.0.0.1, ::1) are always allowed in addition to this list, whatever it says. The install wizard sets it without asking; change it in Share this PC > Advanced (a toggle row; space shows the Allowed devices and Port fields under it), or with `freecad-mcp share --allowed-ips`. |
 | Password | none | Sent by every connecting client; required whenever it is not empty. The same password also protects the local addon, so agents on the shared computer need it too once one is set. |
 | Port | 9876 | The listener's own port. |
 | Session timeout | 30 minutes | How long an idle agent keeps FreeCAD before another agent can take it; see [multi-agent rules](#multi-agent-rules). |
