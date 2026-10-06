@@ -233,19 +233,56 @@ func TestListObjectsCompactIsATable(t *testing.T) {
 	fc := addon(t, map[string]xmlrpctest.Handler{
 		"get_objects": func([]any) (any, error) {
 			return []any{
-				map[string]any{"name": "Box", "label": "Box", "type": "Part::Box", "state": []any{}, "valid": true, "parent": "", "visible": true},
-				map[string]any{"name": "Clip", "label": "Clip|2", "type": "Part::Cut", "state": []any{"Touched"}, "valid": false, "parent": "Body", "visible": nil},
+				map[string]any{"name": "Box", "label": "Box", "type": "Part::Box", "state": []any{}, "valid": true, "parent": "", "solids": int64(1), "visible": true},
+				map[string]any{"name": "Clip", "label": "Clip|2", "type": "Part::Cut", "state": []any{"Touched"}, "valid": false, "parent": "Body", "parents": []any{"Body", "Fz"}, "solids": int64(0), "visible": nil},
 			}, nil
 		},
 	})
 	text := replyText(call(t, session(t, settingsFor(fc)), "list_objects", map[string]any{"doc_name": "D", "compact": true}))
-	for _, want := range []string{"| Name | Label | Type | State | Valid | Parent | Visible |", "| Box | Box | Part::Box |  | true |  | true |",
-		`| Clip | Clip\|2 | Part::Cut | Touched | false | Body | unknown |`} {
+	for _, want := range []string{"| Name | Label | Type | State | Valid | Parent | Solids | Visible |", "| Box | Box | Part::Box |  | true |  | 1 | true |",
+		`| Clip | Clip\|2 | Part::Cut | Touched | false | Body, Fz | 0 | unknown |`} {
 		if !strings.Contains(text, want) {
 			t.Errorf("table lacks %q:\n%s", want, text)
 		}
 	}
 	if strings.Contains(text, `"name"`) {
 		t.Errorf("reply still holds JSON:\n%s", text)
+	}
+}
+
+func TestRecomputeListsEmptyAndNoOpResults(t *testing.T) {
+	reply := func(recomputed int64, empty []any) func([]any) (any, error) {
+		return func([]any) (any, error) {
+			return map[string]any{"success": true, "document": "D", "recomputed": recomputed, "object_count": int64(7),
+				"invalid_objects": []any{}, "invalid_count": int64(0), "invalid_truncated": false,
+				"touched_objects": []any{}, "touched_count": int64(0), "touched_truncated": false,
+				"empty_results": empty, "empty_count": int64(len(empty)), "empty_truncated": false}, nil
+		}
+	}
+	empty := []any{
+		map[string]any{"name": "EmptyCommon", "reason": "no solid: its inputs do not overlap"},
+		map[string]any{"name": "NoCut", "reason": "the tool does not reach the base"},
+	}
+	for name, tc := range map[string]struct {
+		recomputed int64
+		empty      []any
+		want       []string
+		notWant    string
+	}{
+		"empty results": {3, empty, []string{"recomputed: 7 object(s), none invalid.",
+			"Empty or no-op results: EmptyCommon (no solid: its inputs do not overlap), NoCut (the tool does not reach the base)", "empty_count: 2"}, "cleanly"},
+		"clean":         {3, nil, []string{"recomputed cleanly: 7 object(s), none invalid."}, "Empty or no-op"},
+		"nothing to do": {0, nil, []string{"Document 'D': no object needed a recompute; 7 object(s), none invalid.", "recomputed: 0"}, "cleanly"},
+	} {
+		fc := addon(t, map[string]xmlrpctest.Handler{"recompute_document": reply(tc.recomputed, tc.empty)})
+		text := replyText(call(t, session(t, settingsFor(fc)), "recompute_document", map[string]any{"doc_name": "D", "include_screenshot": false}))
+		for _, want := range tc.want {
+			if !strings.Contains(text, want) {
+				t.Errorf("%s: reply lacks %q:\n%s", name, want, text)
+			}
+		}
+		if strings.Contains(text, tc.notWant) {
+			t.Errorf("%s: reply holds %q:\n%s", name, tc.notWant, text)
+		}
 	}
 }

@@ -19,6 +19,7 @@ import FreeCAD
 import ObjectsFem
 
 from rpc_server.agent_log import agent_error, agent_warning
+from rpc_server.empty_results import empty_result
 from rpc_server.fem_loads import load_info
 from rpc_server.property_mapper import FILLET_TYPES, Object, fillet_edges_text, quantity_values, set_object_property
 from rpc_server.object_validation import object_validity_error
@@ -337,52 +338,12 @@ def _name_and_placement_fields(obj: Any, requested: list) -> dict[str, Any]:
     return fields
 
 
-#: Types that make a solid from solid inputs, with the properties that hold the
-#: inputs: a result with no solid then means the inputs miss each other or one
-#: removes the other. Any other type with a solid in its OutList (a sketch
-#: attached to a face, an extrusion with Solid false) holds no solid by design.
-_SOLID_INPUTS = {
-    "Part::Cut": ("Base", "Tool"),
-    "Part::Common": ("Base", "Tool"),
-    "Part::Fuse": ("Base", "Tool"),
-    "Part::MultiFuse": ("Shapes",),
-    "Part::MultiCommon": ("Shapes",),
-    "Part::Fillet": ("Base",),
-    "Part::Chamfer": ("Base",),
-    "Part::Thickness": ("Faces",),
-    "Part::Offset": ("Source",),
-    "Part::Mirroring": ("Source",),
-}
-
-_EMPTY_RESULT_TEXT = {
-    "Part::Common": "its inputs do not overlap",
-    "Part::MultiCommon": "its inputs do not overlap",
-    "Part::Cut": "the tool removes all of the base",
-}
-
-
-def _linked_objects(value: Any) -> list:
-    """The objects a link value holds: one object, a list of them, or
-    ``(object, sub-elements)`` pairs."""
-    if isinstance(value, (tuple, list)):
-        if len(value) == 2 and isinstance(value[1], (tuple, list, str)) and hasattr(value[0], "Name"):
-            return [value[0]]
-        return [item for entry in value for item in _linked_objects(entry)]
-    return [value] if hasattr(value, "Name") else []
-
-
-def _holds_solid(obj: Any) -> bool:
-    try:
-        return bool(obj.Shape.Solids)
-    except Exception:
-        return False
-
-
 def _shape_fields(obj: Any) -> dict[str, Any]:
     """The reply fields for an object with a Shape: what the shape holds, and a
     warning when a boolean or a solid-making feature holds no solid although
-    one of its inputs does. A container with no feature in it yet (an empty
-    PartDesign::Body) has a null shape and nothing to report."""
+    one of its inputs does, or a Cut removed nothing. A container with no
+    feature in it yet (an empty PartDesign::Body) has a null shape and nothing
+    to report."""
     if getattr(obj, "Shape", None) is None:
         return {}
     summary = shape_summary(obj.Shape)
@@ -391,17 +352,9 @@ def _shape_fields(obj: Any) -> dict[str, Any]:
     if summary.get("null") and hasattr(obj, "Group") and not obj.Group:
         return {}
     fields: dict[str, Any] = {"shape": summary}
-    try:
-        inputs = [
-            item
-            for prop in _SOLID_INPUTS.get(obj.TypeId, ())
-            for item in _linked_objects(getattr(obj, prop, None))
-        ]
-        if not summary.get("solids") and any(_holds_solid(item) for item in inputs):
-            why = _EMPTY_RESULT_TEXT.get(obj.TypeId, "its inputs do not overlap or one removes all of the other")
-            fields["warning"] = f"The result holds no solid: {why}. Check their Placement."
-    except Exception:
-        pass
+    found = empty_result(obj, summary.get("volume"))
+    if found is not None:
+        fields["warning"] = found[0]
     return fields
 
 

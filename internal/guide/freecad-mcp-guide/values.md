@@ -58,6 +58,12 @@ Applies to obj_properties in create_object and update_object.
 - Set Placement with update_object after create_object, or in the same create_object call.
 - Size comes from the object's own properties (Length, Radius, Height). There is no scale property.
 
+## Triangles and polygons
+
+- A triangular gusset: Part::Wedge with Xmin 0, Xmax a, Ymin 0, Ymax b, Zmin 0, Zmax t, X2min 0, X2max 0, Z2min 0, Z2max t. It is a right triangle in the xy plane with legs a (x) and b (y), the right angle at the origin, extruded t along z: a = 30, b = 12, t = 4 gives 30 x 12 x 4 mm and 720 mm^3.
+- To stand it with legs along x and z and the thickness along y, set Placement Base (0, t, 0) and Rotation Axis (1, 0, 0) Angle 90: it then fills x 0 to a, y 0 to t, z 0 to b.
+- A regular polygon prism: Part::Prism with Polygon (the number of sides), Circumradius (centre to corner) and Height. A hexagon with Circumradius 10 is 20 mm across the corners.
+
 ## Colors
 
 {"ViewObject": {"ShapeColor": [0.8, 0.2, 0.2, 1.0]}}

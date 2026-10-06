@@ -176,3 +176,10 @@ def test_out_and_in_lists_name_each_object_once_in_order():
     obj = types.SimpleNamespace(OutList=[twice, types.SimpleNamespace(Name="Tool"), twice], InList=[])
     assert serialize._names(obj, "OutList") == ["Outer", "Tool"]
     assert serialize._names(obj, "InList") == []
+
+
+def test_the_solid_count_is_blank_without_a_shape_and_zero_for_an_empty_or_unreadable_one():
+    assert serialize.solid_count_of(types.SimpleNamespace()) is None
+    assert serialize.solid_count_of(types.SimpleNamespace(Shape=types.SimpleNamespace(Solids=[]))) == 0
+    assert serialize.solid_count_of(types.SimpleNamespace(Shape=types.SimpleNamespace(Solids=[1, 2]))) == 2
+    assert serialize.solid_count_of(types.SimpleNamespace(Shape=types.SimpleNamespace())) == 0

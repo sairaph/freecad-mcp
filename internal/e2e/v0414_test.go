@@ -38,7 +38,7 @@ func TestCreateAndUpdateReportShapeWarningAndHiddenInputs(t *testing.T) {
 		"Shape: no solid", "Warning: The result holds no solid: the tool removes all of the base.")
 
 	must(t, call(t, cs, "list_objects", map[string]any{"doc_name": doc, "compact": true}),
-		"| Name | Label | Type | State | Valid | Parent | Visible |", "| Block | Block | Part::Box |", "| Clip | Clip | Part::Cut |")
+		"| Name | Label | Type | State | Valid | Parent | Solids | Visible |", "| Block | Block | Part::Box |", "| Clip | Clip | Part::Cut |")
 
 	// The form code.md gives for a script that builds a fillet.
 	must(t, call(t, cs, "execute_code", map[string]any{"include_screenshot": false, "code": "d = FreeCAD.getDocument('" + doc + "')\n" +

@@ -229,7 +229,10 @@ and counts its shells, faces or edges instead). When the shape is null or has
 no solid although an input has one (a `Part::Common` of parts that do not
 overlap, a `Part::Cut` whose tool removes the base) the reply adds a warning,
 `Warning: The result holds no solid: its inputs do not overlap. Check their
-Placement.` The object stays and the call still succeeds. Types whose result
+Placement.` The object stays and the call still succeeds. A `Part::Cut` whose result
+volume equals its base's (relative 1e-9, or 1e-6 mm^3) while the tool holds a
+solid warns `The tool does not reach the base: nothing was removed. Check
+their Placement.` Types whose result
 is edges or faces by design (section, slice, cross sections, projection, 2D
 offset) give no warning.
 
@@ -333,8 +336,11 @@ List every object in a document with its type and properties.
 
 - `doc_name` (string, required)
 - `compact` (boolean, default `false`): a table with one short row per object
-  (name, label, type, state, valid, parent, visible) instead of every
-  property as JSON.
+  (name, label, type, state, valid, parent, solids, visible) instead of every
+  property as JSON. `Parent` lists every parent, comma separated, in FreeCAD's
+  order (a tool shared by two booleans has two); `Solids` is the number of
+  solids of the shape, so an empty result reads 0, blank for an object with no
+  shape.
 - `include_screenshot` (boolean, default `false`), `view_name`: see
   [screenshot options](#screenshot-options). The screenshot is off unless
   `include_screenshot` is passed as `true`.
@@ -760,7 +766,7 @@ analytical comparison. For long analyses, configure the client to allow the
 ### `recompute_document`
 
 Recompute every object of a document and report each that failed or is still
-touched.
+touched, and each boolean whose result is empty or removed nothing.
 
 - `doc_name` (string, required)
 - `include_screenshot`, `view_name`: see [screenshot options](#screenshot-options).
@@ -771,6 +777,17 @@ break), or when `open_document` reports the document needs a recompute. The
 reply lists each failed object with FreeCAD's status message, and each object
 still touched afterwards. Fix a failed object with `update_object` or remove
 it with `delete_object`; failures do not make the call itself fail.
+
+FreeCAD calls an empty boolean valid, so after the invalid objects the reply
+also lists the results that hold nothing useful: `Empty or no-op results:
+EmptyCommon (no solid: its inputs do not overlap), NoCut (the tool does not
+reach the base)`. The same rules as in `create_object` apply (a `Part::Common`,
+`Part::Cut` and the other solid-making types with no solid although an input
+has one, and a `Part::Cut` whose result volume equals its base's although the
+tool holds a solid). With any of them the reply does not say "cleanly", and the
+frontmatter has `empty_count`. When no object needed a recompute (`recomputed:
+0`) the reply says so: `Document 'X': no object needed a recompute; 7
+object(s), none invalid.`
 
 ### `undo`
 

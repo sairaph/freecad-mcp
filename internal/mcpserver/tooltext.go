@@ -199,7 +199,7 @@ var toolTexts = map[string]toolText{
 
 	// Objects.
 	"list_objects": {
-		Description: `List the objects of a document with type and properties. Pass compact true for a table with one short row per object (name, label, type, state, valid, parent, visible); use it first to learn the object names other tools take. No screenshot unless include_screenshot is true. An unknown document gives an empty list.`,
+		Description: `List the objects of a document with type and properties. Pass compact true for a table with one short row per object (name, label, type, state, valid, parents, solids, visible); use it first to learn the object names other tools take. No screenshot unless include_screenshot is true. An unknown document gives an empty list.`,
 		Params: map[string]string{
 			"compact":            "one short row per object instead of all properties (default false)",
 			"include_screenshot": noScreenshotText,
@@ -214,7 +214,7 @@ var toolTexts = map[string]toolText{
 		Params:      map[string]string{"kind": "which sub-elements to list (default faces)"},
 	},
 	"create_object": {
-		Description: `Create one object in a document. Use the name the reply returns (FreeCAD may rename: Box001). The reply gives the shape (solids, size, volume), warns of a result with no solid, and lists the quantities set, the edges of a fillet or chamfer, and the objects that went hidden (booleans, compounds, Fillet, Chamfer, Extrusion, Revolution, Thickness hide theirs). An error before the object exists creates nothing; one that does not compute stays: fix it with update_object or delete_object.
+		Description: `Create one object in a document. Use the name the reply returns (FreeCAD may rename: Box001). The reply gives the shape (solids, size, volume), warns of an empty result or a Cut that removed nothing, and lists the quantities set, the edges of a fillet or chamfer, and the objects that went hidden (booleans, compounds, Fillet, Chamfer, Extrusion, Revolution, Thickness hide theirs). An error before the object exists creates nothing; one that does not compute stays: fix it with update_object or delete_object.
 FEM: create Fem::AnalysisPython first; pass analysis_name for its material, constraints and mesh; then run_fem_analysis. Fem::MaterialCommon takes Material as {"Name": "Steel", "YoungsModulus": "210 GPa", "PoissonRatio": 0.3, "Density": "7900 kg/m^3"}. Fem::FemMeshGmsh takes Shape (the solid's name) and CharacteristicLengthMax/Min in mm, and meshes on creation. A Fem::ConstraintForce acts along its face's outward normal, a Fem::ConstraintPressure into it; Reversed true flips either.`,
 		Params: map[string]string{
 			"obj_type":       `FreeCAD type, such as Part::Box, Part::Cylinder, Part::Cut, PartDesign::Body, Spreadsheet::Sheet, Fem::AnalysisPython, Fem::ConstraintFixed. Of the Python-only types only these work: Part::Tube (needs InnerRadius, OuterRadius, Height), Draft::Circle (Radius), Draft::Rectangle (Length, Height), Draft::Polygon (FacesNumber, Radius), Draft::Wire (Points, optional Closed); build others with execute_code`,
@@ -231,7 +231,7 @@ FEM: create Fem::AnalysisPython first; pass analysis_name for its material, cons
 		Description: `Delete an object. Objects that use it (a Part::Cut's Base or Tool) may become invalid: call recompute_document afterwards to see which.`,
 	},
 	"recompute_document": {
-		Description: `Recompute a document and list every object that failed, with FreeCAD's message, and every object still touched. Call it after a series of changes, after delete_object, or when a document needs a recompute. Failures do not fail the call; fix them with update_object or delete_object.`,
+		Description: `Recompute a document and list every object that failed, with FreeCAD's message, every object still touched, and every boolean whose result is empty or removed nothing. Call it after a series of changes, after delete_object, or when a document needs a recompute. Failures do not fail the call; fix them with update_object or delete_object.`,
 		Params:      map[string]string{"timeout": timeoutText(120)},
 	},
 	"undo": {
