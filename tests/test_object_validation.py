@@ -32,6 +32,10 @@ class FakeConsole:
     def PrintError(cls, message: str) -> None:
         cls.messages.append(("error", message))
 
+    @classmethod
+    def PrintWarning(cls, message: str) -> None:
+        cls.messages.append(("warning", message))
+
 
 class FakeDocument:
     def __init__(self, obj: object):
@@ -544,3 +548,240 @@ def test_an_edge_that_cannot_be_rounded_says_which_edges_to_leave_out() -> None:
         assert row["status"] == "There are no suitable edges for chamfer or fillet. " + expected
     other = failing("Cut", type_id="Part::Cut", status="There are no suitable edges for chamfer or fillet", Base=base)
     assert invalid_object_row(other)["status"] == "There are no suitable edges for chamfer or fillet"
+
+
+def chain_object(name: str, *, states=("Up-to-date",), shape: bool = True, invalid: bool = False, deps=()) -> types.SimpleNamespace:
+    obj = types.SimpleNamespace(
+        Name=name, Label=name, TypeId="Part::Feature", State=list(states), OutList=list(deps), InList=[],
+        isValid=lambda: not invalid, getStatusString=lambda: "BRep_API: command not done" if invalid else "Valid",
+    )
+    if shape:
+        obj.Shape = types.SimpleNamespace()
+    for dep in deps:
+        dep.InList.append(obj)
+    return obj
+
+
+def test_objects_built_on_a_failed_one_are_listed_as_not_rebuilt() -> None:
+    from rpc_server import object_validation
+
+    outer = chain_object("Outer")
+    fillet = chain_object("OuterFillet", states=("Touched", "Invalid"), invalid=True, deps=[outer])
+    cavity = chain_object("Cavity")
+    shell = chain_object("Shell", states=("Expanded", "Up-to-date"), deps=[fillet, cavity])
+    boss = chain_object("Boss")
+    body = chain_object("Body", deps=[shell, boss])
+    sheet = chain_object("Params", shape=False)
+    chain_object("Group", shape=False, deps=[body])
+
+    report = object_validation.invalid_objects_report([outer, fillet, cavity, shell, boss, body, sheet])
+
+    assert [row["name"] for row in report["invalid_objects"]] == ["OuterFillet"]
+    assert report["stale_objects"] == [{"name": "Shell", "depends_on": "OuterFillet"}, {"name": "Body", "depends_on": "OuterFillet"}]
+    assert report["stale_count"] == 2 and report["stale_truncated"] is False
+
+
+def test_nothing_is_stale_when_nothing_failed_and_a_failed_dependent_is_not_listed_twice() -> None:
+    from rpc_server import object_validation
+
+    base = chain_object("Base")
+    top = chain_object("Top", deps=[base])
+    assert object_validation.invalid_objects_report([base, top])["stale_objects"] == []
+
+    first = chain_object("First", states=("Touched", "Invalid"), invalid=True)
+    second = chain_object("Second", states=("Touched",), deps=[first])
+    third = chain_object("Third", deps=[second])
+    fourth = chain_object("Fourth", states=("Touched", "Invalid"), invalid=True, deps=[third])
+    report = object_validation.invalid_objects_report([first, second, third, fourth])
+    # Second is Touched, so it is failed itself and a row of its own (waiting for First). Third builds on Second and is
+    # listed once, under it; Fourth builds on Third and is failed, so it is not listed as stale.
+    assert [row["name"] for row in report["invalid_objects"]] == ["First", "Second", "Fourth"]
+    assert report["stale_objects"] == [{"name": "Third", "depends_on": "Second"}]
+    assert report["invalid_objects"][1]["waits_for"] == "First"
+
+
+def test_each_failed_object_gets_its_own_group_and_a_cycle_ends() -> None:
+    from rpc_server import object_validation
+
+    a = chain_object("A", states=("Invalid",), invalid=True)
+    b = chain_object("B", states=("Invalid",), invalid=True)
+    on_a = chain_object("OnA", deps=[a])
+    on_b = chain_object("OnB", deps=[b])
+    both = chain_object("Both", deps=[on_a, on_b])
+    # A dependency loop FreeCAD forbids but a broken file could hold: the visited set ends the walk.
+    on_a.InList.append(both)
+    report = object_validation.invalid_objects_report([a, b, on_a, on_b, both])
+    assert report["stale_objects"] == [{"name": "OnA", "depends_on": "A"}, {"name": "Both", "depends_on": "A"}, {"name": "OnB", "depends_on": "B"}]
+
+
+def test_the_stale_list_is_capped_with_the_true_count() -> None:
+    from rpc_server import object_validation
+
+    failed = chain_object("Failed", states=("Invalid",), invalid=True)
+    many = [chain_object(f"On{i}", deps=[failed]) for i in range(5)]
+    report = object_validation.invalid_objects_report([failed, *many], limit=2)
+    assert len(report["stale_objects"]) == 2 and report["stale_count"] == 5 and report["stale_truncated"] is True
+
+
+def test_the_dependency_walk_touches_only_what_depends_on_a_failed_object() -> None:
+    from rpc_server import object_validation
+
+    failed = chain_object("Failed", states=("Invalid",), invalid=True)
+    on_failed = chain_object("OnFailed", deps=[failed])
+    unrelated = [chain_object(f"Free{i}") for i in range(2000)]
+
+    class Counting(list):
+        reads = 0
+
+        def __iter__(self):
+            Counting.reads += 1
+            return super().__iter__()
+
+    for obj in unrelated:
+        obj.InList = Counting()
+    report = object_validation.invalid_objects_report([failed, on_failed, *unrelated])
+    assert report["stale_count"] == 1
+    assert Counting.reads == 0
+
+
+class Flipping(types.SimpleNamespace):
+    """An object that fails once the document recomputes."""
+
+    def fail(self) -> None:
+        self.State, self.broken = ["Touched", "Invalid"], True
+
+
+def flipping(name: str, deps=(), broken: bool = False) -> Flipping:
+    obj = Flipping(Name=name, Label=name, TypeId="Part::Fillet", State=["Touched", "Invalid"] if broken else ["Up-to-date"], OutList=list(deps), InList=[],
+                   broken=broken, Shape=types.SimpleNamespace(Solids=[], Volume=0.0))
+    obj.isValid = lambda: not obj.broken
+    obj.getStatusString = lambda: "BRep_API: command not done" if obj.broken else "Valid"
+    for dep in deps:
+        dep.InList.append(obj)
+    return obj
+
+
+def test_a_successful_update_names_the_objects_it_made_fail_and_those_not_rebuilt() -> None:
+    target = FakeObject(Name="Outer", Shape=None)
+    target.Label, target.InList, target.OutList = "Outer", [], []
+    already = flipping("AlreadyBroken", broken=True)
+    fillet = flipping("OuterFillet", deps=[target])
+    shell = flipping("Shell", deps=[fillet])
+
+    class Doc(FakeDocument):
+        def recompute(self) -> None:
+            super().recompute()
+            fillet.fail()
+
+    doc = Doc(target)
+    doc.Objects.extend([already, fillet, shell])
+    with load_object_factory(doc) as object_factory:
+        result = object_factory.edit_object_gui("Doc", object_factory.Object(name="Outer", properties={}))
+
+    assert result["success"] is True
+    assert [row["name"] for row in result["invalid_objects"]] == ["OuterFillet"]
+    assert result["invalid_count"] == 1 and result["invalid_truncated"] is False
+    assert result["stale_objects"] == [{"name": "Shell", "depends_on": "OuterFillet"}] and result["stale_count"] == 1
+
+
+def test_a_failing_update_lists_the_other_objects_it_made_fail_with_its_own_dependents() -> None:
+    target = flipping("Outer")
+    other = flipping("Other")
+    on_target = flipping("OnOuter", deps=[target])
+
+    class Doc(FakeDocument):
+        def recompute(self) -> None:
+            super().recompute()
+            target.fail()
+            other.fail()
+
+    doc = Doc(target)
+    doc.Objects.extend([other, on_target])
+    with load_object_factory(doc) as object_factory:
+        result = object_factory.edit_object_gui("Doc", object_factory.Object(name="Outer", properties={}))
+
+    assert result["success"] is False
+    assert [row["name"] for row in result["invalid_objects"]] == ["Other"]
+    assert result["stale_objects"] == [{"name": "OnOuter", "depends_on": "Outer"}]
+
+
+def test_nothing_is_added_when_the_change_made_nothing_fail() -> None:
+    target = FakeObject(Name="Outer", Shape=None)
+    already = flipping("AlreadyBroken", broken=True)
+    doc = FakeDocument(target)
+    doc.Objects.append(already)
+    with load_object_factory(doc) as object_factory:
+        result = object_factory.edit_object_gui("Doc", object_factory.Object(name="Outer", properties={}))
+    assert result["success"] is True
+    assert not any(key in result for key in ("invalid_objects", "invalid_count", "stale_objects", "stale_count"))
+
+
+def test_a_removed_object_leaves_failed_and_stale_dependents_that_are_reported() -> None:
+    from rpc_server import object_validation
+
+    outer = flipping("Outer")
+    fillet = flipping("OuterFillet", deps=[outer])
+    shell = flipping("Shell", deps=[fillet])
+    before = object_validation.failed_names([outer, fillet, shell])
+    assert before == set()
+    # The call removed Outer, so the fillet lost its Base.
+    outer.InList.remove(fillet)
+    fillet.OutList.remove(outer)
+    fillet.fail()
+    report = object_validation.newly_failed_report([fillet, shell], before, None)
+    assert [row["name"] for row in report["invalid_objects"]] == ["OuterFillet"]
+    assert report["stale_objects"] == [{"name": "Shell", "depends_on": "OuterFillet"}]
+    assert report["invalid_count"] == 1 and report["stale_count"] == 1
+    assert object_validation.newly_failed_report([fillet, shell], {"OuterFillet"}, None) == {}
+
+
+def test_a_failing_report_never_fails_the_update_create_or_delete_helpers() -> None:
+    target = FakeObject(Name="Outer", Shape=None)
+    doc = FakeDocument(target)
+    with load_object_factory(doc) as object_factory:
+        def boom(*args, **kwargs):
+            raise RuntimeError("report broke")
+
+        object_factory.newly_failed_report = boom
+        object_factory.stale_dependents = boom
+        result = object_factory.edit_object_gui("Doc", object_factory.Object(name="Outer", properties={}))
+        assert result["success"] is True
+        assert not any(key in result for key in ("invalid_objects", "stale_objects"))
+
+        assert object_factory.collateral_report(doc, set(), None) == {}
+        assert object_factory._stale_fields(target) == {}
+
+        object_factory.failed_names = boom
+        assert object_factory.failed_before(doc) is None
+        # Without the snapshot there is nothing to compare with, so nothing is reported.
+        assert object_factory.collateral_report(doc, None, target) == {}
+        result = object_factory.edit_object_gui("Doc", object_factory.Object(name="Outer", properties={}))
+        assert result["success"] is True
+
+
+def test_the_calls_own_object_is_left_out_by_name_not_identity() -> None:
+    from rpc_server import object_validation
+
+    changed = flipping("Outer", broken=True)
+    same_name_copy = flipping("Outer", broken=True)  # another proxy object for the same document object
+    other = flipping("Other", broken=True)
+    report = object_validation.newly_failed_report([same_name_copy, other], set(), changed)
+    assert [row["name"] for row in report["invalid_objects"]] == ["Other"]
+
+
+def test_a_failing_visibility_report_never_fails_the_update_or_create() -> None:
+    target = FakeObject(Name="Outer", Shape=None)
+    doc = FakeDocument(target)
+    with load_object_factory(doc) as object_factory:
+        def boom(*args, **kwargs):
+            raise RuntimeError("visibility broke")
+
+        object_factory.visibility_snapshot = boom
+        object_factory.newly_hidden = boom
+        assert object_factory.shown_before(doc) == {}
+        assert object_factory.hidden_since(doc, {"Outer": True}) == []
+        result = object_factory.edit_object_gui("Doc", object_factory.Object(name="Outer", properties={}))
+        assert result["success"] is True and "hidden" not in result
+        created = object_factory.create_object_gui("Doc", object_factory.Object(name="Outer", type="Part::Box", properties={}))
+        assert created["success"] is True and "hidden" not in created
+        assert any(kind == "warning" and "shown" in text for kind, text in FakeConsole.messages)

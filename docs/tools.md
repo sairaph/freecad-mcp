@@ -327,8 +327,14 @@ Delete an object from a document.
 - `obj_name` (string, required): the object to delete.
 - `include_screenshot`, `view_name`: see [screenshot options](#screenshot-options).
 
-Objects that depend on it, for example a `Part::Cut` using it as Base or Tool,
-may become invalid; call `list_objects` afterwards to check the document.
+FreeCAD deletes the object even when others use it. Objects that depend on it,
+for example a `Part::Cut` using it as Base or Tool, fail (measured: deleting a
+fillet left the Cut above it `Touched, Invalid` with "Linked object is not a Part
+object", and the Fuse above that `Up-to-date` with its old shape). The reply
+lists the objects the deletion made fail, with the usual rows, and the objects
+that were not rebuilt (`Not rebuilt, still the shape from before: ...`), and
+the frontmatter gets `invalid_count` and `stale_count`; a failure that was
+there before the call is not listed. Undo brings them back.
 
 ### `list_objects`
 
@@ -606,7 +612,9 @@ Supported extensions: `.step`/`.stp`, `.iges`/`.igs`, `.gltf`/`.glb`
 `.obj`, `.off`, `.ply`, `.3mf` (triangle meshes), `.dxf` and `.svg` (2D
 geometry). The reply lists the created objects with their names for
 `get_object` and `update_object`, the importer used, and any objects left
-invalid by the recompute. Undo removes the whole import in one step.
+invalid by the recompute. The objects built on an invalid one that were not
+rebuilt are named as in the other tools (`Not rebuilt, still the shape from
+before: ...`), with `stale_count` in the frontmatter when there are any. Undo removes the whole import in one step.
 
 Mesh files become Mesh objects, not solids: call `mesh_to_solid` to turn one
 into a Part solid, or `analyze_mesh` and `repair_mesh` to fix it first. An SVG
@@ -785,8 +793,9 @@ touched, and each boolean whose result is empty or removed nothing.
 
 Use it after a series of changes, after `delete_object` (dependents may
 break), or when `open_document` reports the document needs a recompute. The
-reply lists each failed object with FreeCAD's status message, and each object
-still touched afterwards. Fix a failed object with `update_object` or remove
+reply lists each failed object with FreeCAD's status message, then the
+objects built on a failed one that FreeCAD did not rebuild, then each other
+object still touched afterwards. Fix a failed object with `update_object` or remove
 it with `delete_object`; failures do not make the call itself fail.
 
 A failed object's row carries FreeCAD's own message, and for a `Part::Fillet` or
@@ -808,6 +817,31 @@ StandFillet, which failed.` (the nearest failed object it depends on) and its fi
 hint names that object. The same rows appear in the invalid objects of
 `create_object`, `update_object`, `update_spreadsheet_cells` and the other
 replies that list them.
+
+An object FreeCAD skips because something it depends on failed is not always
+marked Touched: a Cut or Fuse above a failed fillet can stay `Up-to-date` and
+`Valid`, holding the shape it had before (measured: after a radius too large,
+the Cut and Fuse above the fillet kept their volumes and `OuterFillet` alone
+was `Touched, Invalid`). Every reply that lists failed objects (`recompute_document`,
+`update_spreadsheet_cells`, `undo`, `redo`, the document replies, and the error
+of `create_object` and `update_object`) therefore also names the objects with a
+shape that depend on a failed one and have not failed themselves: `Not rebuilt,
+still the shape from before: Shell, Body (they depend on OuterFillet, which
+failed).`, grouped by failed object (the one that reaches them first without
+passing another failed object), with `stale_count` in the frontmatter of
+`recompute_document` and `update_spreadsheet_cells`. After the fix, a recompute
+rebuilds them and lists nothing. `create_object` and `update_object` do the same
+for a call that succeeds for its own object but makes another one fail (a box
+dimension that no longer fits the fillet above it): the reply lists the objects
+that failed because of the call, with the same rows (message, advice,
+`waits for`), then `Not rebuilt, still the shape from before: ...`, and the
+frontmatter has `invalid_count` and `stale_count` (left out when zero). Only objects that
+were not failed before the call are listed: a failure that was already there is
+not this call's doing and would repeat in every reply until it is fixed. The
+call's own object is reported as before, and when it fails too, the error also
+names the others (`Other objects failed after this change: ...`). The count of objects "still touched" in
+`recompute_document` is of the Touched objects not listed as invalid; the line
+is left out when there are none.
 
 FreeCAD calls an empty boolean valid, so after the invalid objects the reply
 also lists the results that hold nothing useful: `Empty or no-op results:
@@ -832,6 +866,11 @@ Every tool that changes a document records its changes as one transaction
 named after the tool, such as `MCP: create_object`, next to edits made by hand
 in FreeCAD. The reply names the transactions undone and those left to undo or
 redo. Refused while a task panel is open in FreeCAD.
+
+After the steps the reply lists every failed object of the document (not only
+the ones the steps caused) with the same rows and the same `Not rebuilt` line as
+the other tools, so the line appears once; the frontmatter has `invalid_count` and
+`stale_count` when there are any.
 
 ### `redo`
 

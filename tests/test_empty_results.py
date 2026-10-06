@@ -130,3 +130,29 @@ def test_a_volume_the_caller_already_has_is_not_computed_again() -> None:
     assert Counting.reads == 0
     assert empty_results.empty_result(result) is not None
     assert Counting.reads == 1
+
+
+def test_recompute_does_not_count_a_failed_object_as_merely_touched(recompute, monkeypatch) -> None:
+    def obj(name, states, invalid=False, deps=()):
+        o = types.SimpleNamespace(Name=name, Label=name, TypeId="Part::Feature", State=list(states), OutList=list(deps), InList=[],
+                                  Shape=Shape(1), isValid=lambda: not invalid, getStatusString=lambda: "BRep_API: command not done" if invalid else "Valid")
+        for dep in deps:
+            dep.InList.append(o)
+        return o
+
+    fillet = obj("OuterFillet", ("Touched", "Invalid"), invalid=True)
+    shell = obj("Shell", ("Expanded", "Up-to-date"), deps=[fillet])
+    objects = [fillet, shell]
+    doc = types.SimpleNamespace(Objects=objects, recompute=lambda: 1)
+    monkeypatch.setattr(recompute, "require_document", lambda name: (doc, None))
+
+    reply = recompute.recompute_document("D")
+
+    assert reply["invalid_count"] == 1 and reply["touched_count"] == 0 and reply["touched_objects"] == []
+    assert reply["stale_objects"] == [{"name": "Shell", "depends_on": "OuterFillet"}] and reply["stale_count"] == 1
+
+    # A Touched object that the invalid list does not hold (cut off by its cap) is still counted.
+    monkeypatch.setattr(recompute, "invalid_objects_report", lambda objs: {"invalid_objects": [], "invalid_count": 1, "invalid_truncated": True,
+                                                                          "stale_objects": [], "stale_count": 0, "stale_truncated": False})
+    reply = recompute.recompute_document("D")
+    assert reply["touched_objects"] == ["OuterFillet"] and reply["touched_count"] == 1

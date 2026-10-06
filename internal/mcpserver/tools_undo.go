@@ -37,6 +37,9 @@ type undoFront struct {
 	Redone    *int   `yaml:"redone,omitempty"`
 	UndoCount int    `yaml:"undo_count"`
 	RedoCount int    `yaml:"redo_count"`
+	// InvalidCount and StaleCount are set when the steps left objects failed or not rebuilt.
+	InvalidCount int `yaml:"invalid_count,omitempty"`
+	StaleCount   int `yaml:"stale_count,omitempty"`
 }
 
 func (s *Server) undo(ctx context.Context, _ *mcp.CallToolRequest, in undoInput) (*mcp.CallToolResult, any, error) {
@@ -80,7 +83,8 @@ func (s *Server) undoOrRedo(ctx context.Context, in undoInput, which string) (*m
 	undoNames := stringItems(res["undo_names"])
 	redoNames := stringItems(res["redo_names"])
 
-	front := undoFront{Document: in.DocName, UndoCount: len(undoNames), RedoCount: len(redoNames)}
+	front := undoFront{Document: in.DocName, UndoCount: len(undoNames), RedoCount: len(redoNames),
+		InvalidCount: invalidObjectsCount(res), StaleCount: intField(res, "stale_count")}
 	walkedCount := len(walked)
 	if which == "undo" {
 		front.Undone = &walkedCount

@@ -193,13 +193,53 @@ def invalid_object_row(obj: Any, waits_for: str | None = _UNSET) -> dict[str, An
     }
 
 
+def stale_dependents(failed: list[Any], limit: int = MAX_LISTED_OBJECTS, *, exclude_touched: bool = False) -> tuple[list[dict[str, str]], int]:
+    """The objects with a shape that depend on a failed object and have not
+    failed themselves, as ``({"name", "depends_on"} rows, true total)``.
+
+    FreeCAD skips the dependents of an object whose recompute failed, and a
+    dependent it does not mark Touched keeps the shape it was built with, valid
+    and up to date to every check. Each is listed once, under the failed object
+    that reaches it first without passing another failed object (that one is
+    a source of its own). One walk over the dependency lists (``InList``) from
+    all the failed objects with a visited set, so a cycle ends and the cost
+    follows the dependents, not the document.
+    """
+    failed_names = {str(getattr(obj, "Name", "")) for obj in failed}
+    seen = set(failed_names)
+    rows: list[dict[str, str]] = []
+    total = 0
+    for source in failed:
+        source_name = str(getattr(source, "Name", ""))
+        queue = [source]
+        while queue:
+            following = []
+            for current in queue:
+                for dep in getattr(current, "InList", None) or []:
+                    name = str(getattr(dep, "Name", ""))
+                    if name in seen:
+                        continue
+                    seen.add(name)
+                    following.append(dep)
+                    if getattr(dep, "Shape", None) is None:
+                        continue
+                    if object_validity_error(dep, exclude_touched=exclude_touched, explain=False) is not None:
+                        continue
+                    total += 1
+                    if len(rows) < limit:
+                        rows.append({"name": name, "depends_on": source_name})
+            queue = following
+    return rows, total
+
+
 def invalid_objects_report(
     objects: Iterable[Any], limit: int = MAX_LISTED_OBJECTS, *, exclude_touched: bool = False
 ) -> dict[str, Any]:
-    """Return ``{"invalid_objects", "invalid_count", "invalid_truncated"}`` for ``objects``.
+    """Return ``{"invalid_objects", "invalid_count", "invalid_truncated",
+    "stale_objects", "stale_count", "stale_truncated"}`` for ``objects``.
 
-    Every mutating and document-listing reply's three invalid-object keys,
-    built together in a single pass over ``objects`` so ``object_validity_error``
+    Every mutating and document-listing reply's invalid-object keys, built
+    together in a single pass over ``objects`` so ``object_validity_error``
     runs once per object rather than once for the capped rows and again for
     the true count. ``objects`` is any iterable of FreeCAD document objects,
     most often a document's ``.Objects``, but a caller that only wants the
@@ -207,18 +247,72 @@ def invalid_objects_report(
     ``exclude_touched`` is passed through to ``object_validity_error``.
     ``invalid_objects`` is capped at ``limit`` rows; ``invalid_count`` is
     always the true total, and ``invalid_truncated`` is set once the cap cuts
-    the list short.
+    the list short. ``stale_objects`` (see ``stale_dependents``) follows the
+    same cap rule.
     """
     rows: list[dict[str, Any]] = []
+    failed: list[Any] = []
     count = 0
     for obj in objects:
         if object_validity_error(obj, exclude_touched=exclude_touched, explain=False) is None:
             continue
         count += 1
+        failed.append(obj)
         if len(rows) < limit:
             rows.append(invalid_object_row(obj))
+    stale, stale_total = stale_dependents(failed, limit, exclude_touched=exclude_touched) if failed else ([], 0)
     return {
         "invalid_objects": rows,
         "invalid_count": count,
         "invalid_truncated": count > len(rows),
+        "stale_objects": stale,
+        "stale_count": stale_total,
+        "stale_truncated": stale_total > len(stale),
+    }
+
+
+def failed_names(objects: Iterable[Any]) -> set[str]:
+    """The names of the objects that count as failed (see
+    ``object_validity_error``), taken before a change so the objects the change
+    makes fail can be told from the ones that already had."""
+    return {
+        str(getattr(obj, "Name", ""))
+        for obj in objects
+        if object_validity_error(obj, explain=False) is not None
+    }
+
+
+def newly_failed_report(
+    objects: Iterable[Any], before: set[str], changed: Any, limit: int = MAX_LISTED_OBJECTS
+) -> dict[str, Any]:
+    """The invalid-object keys of ``invalid_objects_report`` for the objects
+    that failed after a change although they had not failed before it
+    (``before`` is ``failed_names`` from before), leaving out ``changed``, the
+    object the call is about and reports itself (by Name; None when the call
+    removed it). The objects that built on a failed one (``changed`` too, when
+    it failed) and were not rebuilt come with them. ``{}`` when nothing newly
+    failed. An object that failed before and still fails is not the change's
+    doing, so it is left out."""
+    changed_name = None if changed is None else str(getattr(changed, "Name", ""))
+    newly = [
+        obj
+        for obj in objects
+        if str(getattr(obj, "Name", "")) != changed_name
+        and str(getattr(obj, "Name", "")) not in before
+        and object_validity_error(obj, explain=False) is not None
+    ]
+    if not newly:
+        return {}
+    sources = list(newly)
+    if changed is not None and object_validity_error(changed, explain=False) is not None:
+        sources.append(changed)
+    rows = [invalid_object_row(obj) for obj in newly[:limit]]
+    stale, stale_total = stale_dependents(sources, limit)
+    return {
+        "invalid_objects": rows,
+        "invalid_count": len(newly),
+        "invalid_truncated": len(newly) > len(rows),
+        "stale_objects": stale,
+        "stale_count": stale_total,
+        "stale_truncated": stale_total > len(stale),
     }

@@ -22,7 +22,7 @@ from rpc_server.agent_log import agent_error, agent_warning
 from rpc_server.empty_results import empty_result
 from rpc_server.fem_loads import load_info
 from rpc_server.property_mapper import FILLET_TYPES, Object, fillet_edges_text, quantity_values, set_object_property
-from rpc_server.object_validation import object_validity_error
+from rpc_server.object_validation import failed_names, newly_failed_report, object_validity_error, stale_dependents
 from rpc_server.serialize import shape_summary
 from rpc_server.source_visibility import hide_sources, newly_hidden, visibility_snapshot
 from rpc_server.transactions import active_document, transaction
@@ -358,6 +358,64 @@ def _shape_fields(obj: Any) -> dict[str, Any]:
     return fields
 
 
+def shown_before(doc: FreeCAD.Document) -> dict[str, bool]:
+    """``visibility_snapshot`` of the document before a change, or {} when it
+    could not be taken: the report of what went hidden must never fail the
+    user's change."""
+    try:
+        return visibility_snapshot(doc)
+    except Exception as e:
+        agent_warning(f"MCP RPC: could not read which objects are shown: {type(e).__name__}: {e}\n")
+        return {}
+
+
+def hidden_since(doc: FreeCAD.Document, shown: dict[str, bool]) -> list[str]:
+    """The objects that went from visible to hidden since ``shown``, or [] when
+    that could not be read."""
+    try:
+        return newly_hidden(doc, shown)
+    except Exception as e:
+        agent_warning(f"MCP RPC: could not read which objects went hidden: {type(e).__name__}: {e}\n")
+        return []
+
+
+def failed_before(doc: FreeCAD.Document) -> set[str] | None:
+    """``failed_names`` of the document before a change, or None when it could
+    not be taken: the report about other objects must never fail the call."""
+    try:
+        return failed_names(doc.Objects)
+    except Exception as e:
+        agent_warning(f"MCP RPC: could not list the failed objects: {type(e).__name__}: {e}\n")
+        return None
+
+
+def collateral_report(doc: FreeCAD.Document, before: set[str] | None, changed: Any) -> dict[str, Any]:
+    """The objects a change made fail or left stale (``newly_failed_report``),
+    or ``{}`` when there are none or the report itself failed: it is extra
+    information about other objects, and a failure of it must not turn the
+    user's create, update or delete into an error."""
+    if before is None:
+        return {}
+    try:
+        return newly_failed_report(doc.Objects, before, changed)
+    except Exception as e:
+        agent_warning(f"MCP RPC: could not list the objects the change broke: {type(e).__name__}: {e}\n")
+        return {}
+
+
+def _stale_fields(failed: Any) -> dict[str, Any]:
+    """The objects built on ``failed`` that FreeCAD did not rebuild, for the
+    reply about a failed object (see object_validation.stale_dependents)."""
+    try:
+        rows, total = stale_dependents([failed])
+    except Exception as e:
+        agent_warning(f"MCP RPC: could not list the objects built on the failed one: {type(e).__name__}: {e}\n")
+        return {}
+    if not rows:
+        return {}
+    return {"stale_objects": rows, "stale_count": total, "stale_truncated": total > len(rows)}
+
+
 def create_object_gui(doc_name: str, obj: Object):
     """Create an object in ``doc_name`` according to ``obj.type``.
 
@@ -383,7 +441,8 @@ def create_object_gui(doc_name: str, obj: Object):
                     "Fem::AnalysisPython container to add the mesh to."
                 )
             existing = {o.Name for o in doc.Objects}
-            shown = visibility_snapshot(doc)
+            before = failed_before(doc)
+            shown = shown_before(doc)
             requested = list(obj.properties)
             try:
                 if obj.type == "Fem::FemMeshGmsh":
@@ -406,9 +465,10 @@ def create_object_gui(doc_name: str, obj: Object):
             if not problem:
                 hide_sources(created, None)
                 extra.update(_shape_fields(created))
-                hidden = newly_hidden(doc, shown)
+                hidden = hidden_since(doc, shown)
                 if hidden:
                     extra["hidden"] = hidden
+            collateral = collateral_report(doc, before, created)
         # The transaction commits above regardless of problem, so an object
         # that failed to compute stays in the document; undo removes it, or
         # the caller can fix it with update_object or remove it with
@@ -419,8 +479,9 @@ def create_object_gui(doc_name: str, obj: Object):
                 "success": False,
                 "object_name": created.Name,
                 "error": problem,
+                **(collateral or _stale_fields(created)),
             }
-        reply = {"success": True, "object_name": created.Name, **tx.reply_fields(), **extra}
+        reply = {"success": True, "object_name": created.Name, **tx.reply_fields(), **extra, **collateral}
         if quantities:
             reply["quantities"] = quantities
         if load is not None:
@@ -449,7 +510,8 @@ def edit_object_gui(doc_name: str, obj: Object):
         # See create_object_gui: hold doc active for the transaction's whole
         # life so FreeCAD does not open an empty linked transaction elsewhere.
         with active_document(doc), transaction("update_object") as tx:
-            shown = visibility_snapshot(doc)
+            before = failed_before(doc)
+            shown = shown_before(doc)
             set_object_property(doc, obj_ins, obj.properties)
             doc.recompute()
             problem = object_validity_error(obj_ins)
@@ -459,9 +521,10 @@ def edit_object_gui(doc_name: str, obj: Object):
             if not problem:
                 hide_sources(obj_ins, obj.properties)
                 extra.update(_shape_fields(obj_ins))
-                hidden = newly_hidden(doc, shown)
+                hidden = hidden_since(doc, shown)
                 if hidden:
                     extra["hidden"] = hidden
+            collateral = collateral_report(doc, before, obj_ins)
         # Commits above regardless of problem, so a property change that left
         # the object invalid stays applied; undo reverts it.
         if problem:
@@ -470,9 +533,10 @@ def edit_object_gui(doc_name: str, obj: Object):
                 "success": False,
                 "object_name": obj_ins.Name,
                 "error": problem,
+                **(collateral or _stale_fields(obj_ins)),
             }
         FreeCAD.Console.PrintMessage(f"Object '{obj_ins.Name}' updated via RPC.\n")
-        reply = {"success": True, "object_name": obj_ins.Name, **tx.reply_fields(), **extra}
+        reply = {"success": True, "object_name": obj_ins.Name, **tx.reply_fields(), **extra, **collateral}
         if quantities:
             reply["quantities"] = quantities
         if load is not None:

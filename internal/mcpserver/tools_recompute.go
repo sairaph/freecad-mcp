@@ -23,6 +23,7 @@ type recomputeFront struct {
 	InvalidCount int    `yaml:"invalid_count"`
 	TouchedCount int    `yaml:"touched_count"`
 	EmptyCount   int    `yaml:"empty_count"`
+	StaleCount   int    `yaml:"stale_count"`
 }
 
 func (s *Server) registerRecomputeTools() {
@@ -62,6 +63,7 @@ func (s *Server) recomputeDocument(ctx context.Context, _ *mcp.CallToolRequest, 
 		InvalidCount: invalidCount,
 		TouchedCount: touchedCount,
 		EmptyCount:   emptyCount,
+		StaleCount:   intField(res, "stale_count"),
 	}
 
 	invalidNames := make(map[string]bool, len(invalidObjs))
@@ -101,33 +103,24 @@ func (s *Server) recomputeDocument(ctx context.Context, _ *mcp.CallToolRequest, 
 			fmt.Fprintf(&body, " (showing the first %d of %d)", len(emptyObjs), emptyCount)
 		}
 	}
+	if note := staleNote(res); note != "" {
+		body.WriteString("\n\n" + note)
+	}
 	if touchedCount > 0 {
-		var names, extra []string
+		// Only objects not listed as invalid are counted here: a failed object
+		// is Touched too, and is already listed above. What is left was
+		// skipped because an upstream dependency failed or otherwise blocked
+		// it (Document::recompute skips the dependents of a failed object), or
+		// was cut off by the cap on the invalid list.
+		var names []string
 		for _, item := range touchedObjs {
 			if n, ok := item.(string); ok {
 				names = append(names, n)
-				if !invalidNames[n] {
-					extra = append(extra, n)
-				}
 			}
 		}
-		// A touched object was skipped during recompute because an upstream
-		// dependency failed or otherwise blocked it (Document::recompute skips
-		// the dependents of a failed object), or FreeCAD flags it as an
-		// anomaly. object_validation treats "touched" as a failed state, so
-		// every touched object is already in invalid_objects above, unless
-		// the cap on that list (invalid_truncated) left it out; only mention
-		// one here that is not accounted for by that.
-		switch {
-		case len(extra) == 0:
-			fmt.Fprintf(&body, "\n\n%d object(s) are still touched after recompute: an upstream dependency failed "+
-				"or otherwise blocked their recompute; each is listed above as invalid, so fix or remove the "+
-				"blocking object listed there.", len(names))
-		default:
-			fmt.Fprintf(&body, "\n\n%d object(s) are still touched after recompute: an upstream dependency failed "+
-				"or otherwise blocked their recompute; fix or remove the blocking object. Not listed above "+
-				"(likely cut off by the invalid-objects cap): %s", len(names), strings.Join(extra, ", "))
-		}
+		fmt.Fprintf(&body, "\n\n%d object(s) are still touched after recompute: an upstream dependency failed "+
+			"or otherwise blocked their recompute; fix or remove the blocking object. Not listed above as invalid: %s",
+			touchedCount, strings.Join(names, ", "))
 		if boolField(res, "touched_truncated") {
 			fmt.Fprintf(&body, " (showing the first %d of %d touched)", len(touchedObjs), touchedCount)
 		}
