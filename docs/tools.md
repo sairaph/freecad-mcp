@@ -198,9 +198,21 @@ Draft::Circle     Radius
 Draft::Rectangle  Length, Height
 Draft::Polygon    FacesNumber, Radius
 Draft::Wire       Points (list of {x, y, z}), optional Closed
+Draft::ShapeString  String, optional Size (mm, default 10) and FontFile
+Draft::OrthoArray   Base, optional NumberX/Y/Z (1) and IntervalX/Y/Z (10)
+Draft::PolarArray   Base, NumberPolar, optional Angle (360) and Center
 ```
 
-A Draft object is a flat profile (a face, or edges for an open wire), not a solid:
+`Draft::ShapeString` without `FontFile` uses the Draft preference `FontFile`
+when it names an existing file, else the first of Arial Bold or Arial (Windows,
+macOS) or DejaVu Sans Bold or DejaVu Sans (Linux) that exists, and the reply
+says `Font: <path>`. With no font found, or a `FontFile` that does not exist,
+the call is refused and nothing is created. The arrays take a number for an
+interval (spacing along its axis) or a vector (`{"x", "y", "z"}` or `[x, y, z]`)
+and are made with `use_link=False`, so their shape is plain and works in
+booleans and exports. `Fuse` and `Axis` are set as ordinary properties. Bind `Number` and `Interval` to the sheet with `update_object` after creation.
+
+A Draft circle, rectangle, polygon, wire or ShapeString is a flat profile (a face, or edges for an open wire), not a solid:
 the reply says so. `Part::Extrusion` with `Base` the Draft object, `DirMode`
 `Normal` and `LengthFwd` makes the solid and hides the profile (an open
 `Draft::Wire` extrudes to a shell: pass `Closed`).
@@ -230,12 +242,23 @@ The reply of a fillet or chamfer call lists its edges as they are now
 A new PartDesign feature (any `PartDesign::` type but the Body) goes into a
 Body the way FreeCAD's own commands put it there (`Body.newObject`, which also
 sets `BaseFeature` and `Tip`). Which Body: `body_name`; else the Body the
-`Profile`, `Base` or `AttachmentSupport` points into; else the document's only
+`Profile`, `Base`, `Originals` or `AttachmentSupport` points into; else the document's only
 Body. A `body_name` that differs from the Body a link points into is refused, naming both. With none, or with several and nothing to tell them apart, the call is
 refused and names the Bodies. A `Sketcher::SketchObject` goes into a Body only
 when `body_name` is given or its `AttachmentSupport` is a feature of a Body, a
 face of one, or a plane of its origin; other sketches stay outside. The reply
 says `In Body 'Body' (Tip: Pad).`, with `body` (`name`, `tip`) in the JSON.
+
+A pattern (`PartDesign::LinearPattern`, `PolarPattern`, `Mirrored`, `MultiTransform`,
+`Scaled`) is made with `doc.addObject`, given its `Originals`, and only then added
+to the Body: FreeCAD moves the Tip to a pattern only when it already has its
+Originals as it joins, and `Body.newObject` adds it first. After any new
+PartDesign solid feature the reply says `Tip stays X: the Body's shape leaves
+out <name>; set the Body's Tip to <name> with update_object.` when the Tip is
+not the new feature. A single sub-element link (`Direction`, `Axis`,
+`MirrorPlane`) given the bare name of an origin feature or datum is stored as `(object, [""])`,
+FreeCAD's form for the whole object, so `"Direction": "X_Axis"` works (any other object keeps no sub-element);
+`["X_Axis", ""]` and `["X_Axis", [""]]` mean the same.
 
 A sketch takes `AttachmentSupport` (FreeCAD 1.0 renamed `Support`; `Support` is
 mapped to it with a note in the reply) in the forms of `References`:

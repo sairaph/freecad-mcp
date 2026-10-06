@@ -46,6 +46,17 @@ Build one solid from sketches: a Body holds the sketches and features in order, 
 - Round edges last. Face and edge numbers change when an earlier feature changes.
 - Never round the cut edge of a hole that a screw or part locates in. Read features.md.
 
+## Patterns
+
+- Repeat a feature with create_object PartDesign::LinearPattern: {"Originals": ["Slot"], "Direction": "X_Axis", "Length": 60, "Occurrences": 4}. Length is the span from the first copy to the last, not the spacing.
+- Direction is the Body's origin axis name ("X_Axis", "Y_Axis", "Z_Axis") or ["Sketch", "Edge1"].
+- A second row: Direction2, Length2 and Occurrences2.
+- PolarPattern: {"Originals": ["Hole"], "Axis": "Z_Axis", "Angle": 360, "Occurrences": 6}.
+- Mirrored: {"Originals": ["Hole"], "MirrorPlane": "YZ_Plane"}. It mirrors through the Body's origin plane: centre the part on it.
+- A pattern of a pattern: give the first pattern as an Original.
+- Bind Occurrences and Length to the sheet ("=Params.slots") so a cell changes the count.
+- Check the reply's Tip names the pattern. When it says "Tip stays X", call update_object on the Body with {"Tip": "<pattern>"}.
+
 ## Placing a Body
 
 - Lay the whole part out with the Body's Placement: update_object on the Body, for example to stand it up or move it onto the plate. Never move or rotate its features one by one: they follow the Body and the sketches stay on their planes.

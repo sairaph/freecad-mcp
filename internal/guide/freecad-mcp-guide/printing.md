@@ -12,10 +12,12 @@ Print each part in the pose it prints in. Lay every part flat on the plate with 
 - A lid or any part with recesses: put the face whose recesses would need bridges facing up, so countersinks and counterbores open upward.
 - A large pocket facing the plate (a washer pocket under a base) needs slicer supports or a different pose. Prefer the pose where it faces up, or split the part. A sacrificial layer only works for small bridges.
 - A part with a cosmetic face puts that face up, unless it is the flat one.
+- Text or a cosmetic relief on a face that ends on the bed (a lid printed upside down for its clips): engrave it (0.6 deep), or put it on a face that prints up. Embossed text on the bed face props the part up. Read features.md Text.
 - Set the pose with update_object on Placement, or in execute_code with the part's Placement.
 - A part is laid flat by rotating it about a horizontal axis by an angle that is not 0, then moving it so its lowest point is z 0.
 - A part that must not be laid flat because of its layers (a thin tab, a clip) is rotated to the pose the user names.
 - Parts that were modelled in an assembly pose keep that pose in the assembly; make a copy of the document for the plate layout. Read assembly.md.
+- The copy is the default. When the layout must follow sheet changes, bind the layout Placements to the sheet in the design file instead: {"Placement.Base.x": "=Params.lidx"}.
 - A part prints best with its lowest point at z 0. check_printability warns when a part is above z 0 ("floats 5 mm above the plate: it needs slicer supports, or move it down so its lowest point is at z 0") and printable stays true: the slicer can support it. Move it down unless the user wants it raised.
 - For a second plate laid beside the first, keep its parts inside that plate's own rectangle and call check_printability with the same bed_x and bed_y and the plate's corner in bed_origin_x and bed_origin_y.
 

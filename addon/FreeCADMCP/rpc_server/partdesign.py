@@ -3,8 +3,9 @@
 A PartDesign feature, and a sketch meant for a Body, belong in that Body the
 way FreeCAD's own commands make them (``Body.newObject``, which also sets
 ``BaseFeature`` and ``Tip``); an object made with ``doc.addObject`` stays
-outside it and the next feature cannot build on it. This module chooses the
-Body, resolves a sketch's ``AttachmentSupport`` (``Support`` in older
+outside it and the next feature cannot build on it (a pattern is the one
+exception: it joins the Body after its Originals are set, see ``TRANSFORMED``).
+This module chooses the Body, resolves a sketch's ``AttachmentSupport`` (``Support`` in older
 FreeCAD), adds ``Geometry`` to a sketch, and maps ``Edges`` of a PartDesign
 Fillet or Chamfer onto its ``Base``. Everything here raises ``ValueError``
 with a message the caller can act on, before the document is changed.
@@ -23,6 +24,17 @@ from rpc_server.property_mapper import parse_reference_entry
 BODY_TYPE = "PartDesign::Body"
 SKETCH_TYPE = "Sketcher::SketchObject"
 DRESSUPS = {"PartDesign::Fillet": "Radius", "PartDesign::Chamfer": "Size"}
+
+#: The PartDesign::Transformed types (patterns). FreeCAD moves the Body's Tip to
+#: one only when it already has its Originals as it joins the Body, so these are
+#: made outside the Body, given Originals, and then added to it.
+TRANSFORMED = (
+    "PartDesign::LinearPattern",
+    "PartDesign::PolarPattern",
+    "PartDesign::Mirrored",
+    "PartDesign::MultiTransform",
+    "PartDesign::Scaled",
+)
 
 #: Roles of a Body's origin features. A bare role name ("XY_Plane") given as a
 #: sketch's support means the origin plane of the Body the sketch goes into.
@@ -116,7 +128,7 @@ def _link_names(value: Any) -> list[str]:
 def _link_owners(doc: Any, properties: dict[str, Any]) -> dict[str, tuple[str, Any]]:
     """The Bodies the link properties point into: Body name to (property, Body)."""
     owners: dict[str, tuple[str, Any]] = {}
-    for key in ("Profile", "Base", "AttachmentSupport", "Support"):
+    for key in ("Profile", "Base", "Originals", "AttachmentSupport", "Support"):
         for name in _link_names(properties.get(key)):
             body = owner_body(doc, doc.getObject(name))
             if body is not None:
@@ -471,3 +483,23 @@ def _plan_sketch(doc: Any, plan: Plan, body: Any, existing: Any) -> Any:
 def body_fields(body: Any) -> dict[str, Any]:
     tip = getattr(body, "Tip", None)
     return {"body": {"name": body.Name, "tip": tip.Name if tip is not None else None}}
+
+
+def tip_note(body: Any, created: Any) -> str | None:
+    """The note for a new PartDesign solid feature that is not the Body's Tip,
+    so the Body's shape leaves it out; None for the Tip itself, a sketch, a
+    datum, a transformation with no Originals or any other object that is no
+    solid feature."""
+    is_derived = getattr(created, "isDerivedFrom", None)
+    if is_derived is None or not is_derived("PartDesign::Feature"):
+        return None
+    tip = getattr(body, "Tip", None)
+    if tip is not None and tip.Name == created.Name:
+        return None
+    if is_derived("PartDesign::Transformed") and not getattr(created, "Originals", None):
+        # No Originals: a MultiTransform child or a pattern still being set up, which FreeCAD does not treat as a solid feature.
+        return None
+    return (
+        f"Tip stays {tip.Name if tip is not None else 'unset'}: the Body's shape leaves out {created.Name}; "
+        f"set the Body's Tip to {created.Name} with update_object."
+    )

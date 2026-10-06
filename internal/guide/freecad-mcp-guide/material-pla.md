@@ -15,7 +15,7 @@ Design rules for FDM parts in PLA with a 0.4 mm nozzle. Sizes in mm. "Per side" 
 - Rotating (a pin turning in a hole): 0.25 per side.
 - Faces that face each other along z in a print-in-place joint (the ends of hinge knuckles): a gap of at least two layer heights (0.4 at 0.2 mm layers) as a starting point. Print a coupon first.
 - Press: aim for 0.1 to 0.2 interference on diameter at printed size; more cracks PLA. Model the hole at pin + 0.05 on diameter for a metal pin, at pin + 0.1 for a printed pin.
-- Avoid clips in PLA: it is brittle (under 2 % stretch across layers) and a held clip creeps loose. Use screws, or PETG for the clip. A PLA clip that cannot be avoided is single use and bends only slightly.
+- Avoid clips in PLA: it is brittle (under 2 % stretch across layers) and a held clip creeps loose. Use screws, or PETG for the clip. A PLA clip that cannot be avoided is single use, with a design strain of 1 % to 1.5 % (half for a beam printed upright): read features.md Snap fits. No latch gap is tested for PLA: use 0.5 per side and print a coupon.
 
 ## Threads
 
