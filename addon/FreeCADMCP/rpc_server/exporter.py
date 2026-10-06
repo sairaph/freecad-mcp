@@ -18,6 +18,7 @@ the functions that need them, on the GUI thread only.
 
 import math
 import os
+import contextlib
 import tempfile
 from typing import Any
 
@@ -60,9 +61,6 @@ STEP_FORMATS = frozenset({"step", "stp", "iges", "igs"})
 GLTF_FORMATS = frozenset({"glb", "gltf"})
 BREP_FORMATS = frozenset({"brep", "brp"})
 SHAPE_ONLY_FORMATS = STEP_FORMATS | GLTF_FORMATS | BREP_FORMATS | frozenset({"dxf", "svg"})
-# Formats that do not route through tessellation.shape_of, so an object
-# nested in a moved App::Part or Body exports at its local position.
-LOCAL_PLACEMENT_FORMATS = STEP_FORMATS | GLTF_FORMATS | frozenset({"dxf", "svg"})
 
 # Keys accepted in ``options``.
 EXPORT_OPTIONS = (
@@ -335,6 +333,110 @@ def _export_mesh(
             App.setActiveDocument(previous_active)
 
 
+def _moved(obj: Any, alone: bool) -> bool:
+    """Whether ``obj`` would be written away from where get_object puts it: it
+    sits in a moved container, or it is the only object written and has a
+    Placement (a lone object is written at the file's origin)."""
+    if tessellation.moving_container(obj) is not None:
+        return True
+    try:
+        return alone and not obj.Placement.isIdentity()
+    except Exception:
+        return False
+
+
+def _is_part(obj: Any) -> bool:
+    try:
+        return bool(obj.isDerivedFrom("App::Part"))
+    except Exception:
+        return False
+
+
+def _copy_of(temp_doc: Any, obj: Any) -> Any:
+    """A copy of ``obj`` in ``temp_doc`` with its own (local) Placement, same Name
+    and Label. An App::Part keeps its members, so the assembly structure survives
+    the write; anything else is a Part::Feature holding the shape (a link or a
+    Body resolves through Part.getShape) and the colour the object shows."""
+    import Part
+
+    if _is_part(obj):
+        copy = temp_doc.addObject("App::Part", obj.Name)
+        copy.Label = obj.Label
+        copy.Placement = obj.Placement
+        for member in obj.Group:
+            if tessellation.global_shape(member) is not None or _is_part(member):
+                copy.addObject(_copy_of(temp_doc, member))
+        return copy
+    copy = temp_doc.addObject("Part::Feature", obj.Name)
+    copy.Shape = Part.getShape(obj).copy()
+    copy.Label = obj.Label
+    try:
+        copy.ViewObject.ShapeColor = obj.ViewObject.ShapeColor
+    except Exception:
+        pass
+    return copy
+
+
+def _global_copy(temp_doc: Any, obj: Any, alone: bool, keep_parts: bool) -> Any:
+    """What stands for ``obj`` in the write, placed as get_object places it.
+
+    A Part written with others keeps its place, so its copy takes the global one.
+    A Part written alone would lose its Placement at the file's root, so the copy
+    has none and each member carries the Part's global placement on top of its
+    own: the same positions and the same assembly nodes. Any other object is a
+    compound that holds its globally placed shape: the compound keeps the
+    location the exporter would drop."""
+    import Part
+
+    if keep_parts and _is_part(obj):
+        copy = _copy_of(temp_doc, obj)
+        global_placement = obj.getGlobalPlacement()
+        if alone:
+            copy.Placement = App.Placement()
+            for member in copy.Group:
+                member.Placement = global_placement.multiply(member.Placement)
+        else:
+            copy.Placement = global_placement
+        return copy
+    copy = temp_doc.addObject("Part::Feature", obj.Name)
+    copy.Shape = Part.makeCompound([tessellation.shape_of(obj)])
+    copy.Label = obj.Label
+    try:
+        copy.ViewObject.ShapeColor = obj.ViewObject.ShapeColor
+    except Exception:
+        pass
+    return copy
+
+
+@contextlib.contextmanager
+def _in_global_place(objects: list, keep_parts: bool = True):
+    """The objects to write for a format that reads each object's own shape.
+
+    ImportGui.export and the DXF and SVG exporters take an object's shape as it
+    is, without the Placement of the App::Part or Body it sits in, so a member of
+    a moved container would be written at its local place; and ImportGui.export
+    drops the Placement of an object written alone. Each such object goes out as
+    a copy in a hidden temporary document (see ``_global_copy``). Every other
+    object, an App::Part written with others included, is written itself.
+    ``keep_parts`` false (DXF and SVG project shapes and have no assembly) makes
+    a Part a compound like any other object.
+    """
+    alone = len(objects) == 1
+    if not any(_moved(obj, alone) for obj in objects):
+        yield objects
+        return
+    previous_active = App.ActiveDocument.Name if App.ActiveDocument else None
+    temp_doc = App.newDocument("MCPExport", hidden=True, temp=True)
+    try:
+        placed = [_global_copy(temp_doc, obj, alone, keep_parts) if _moved(obj, alone) else obj for obj in objects]
+        temp_doc.recompute()
+        yield placed
+    finally:
+        App.closeDocument(temp_doc.Name)
+        if previous_active and previous_active in App.listDocuments():
+            App.setActiveDocument(previous_active)
+
+
 def _export_step(objects: list, path: str, ext: str, opts: dict[str, Any]) -> None:
     import ImportGui
     import Part
@@ -593,21 +695,6 @@ def _export(doc_name: str, path: str, ext: str, opts: dict[str, Any]) -> dict[st
                     + " to include them (the file this call wrote already exists at that path)."
                 )
 
-    if object_names is not None and ext in LOCAL_PLACEMENT_FORMATS:
-        # Only these formats skip the container-placement fix (shape_of):
-        # STEP/IGES/glTF resolve shapes themselves (ImportGui.export), and
-        # DXF/SVG take the objects as they are.
-        nested = [
-            obj.Name for obj in objects
-            if tessellation.parent_geo_feature_group(obj) is not None
-        ]
-        if nested:
-            warnings.append(
-                f"{', '.join(nested)}: this format does not apply an enclosing App::Part or Body's "
-                "placement, unlike mesh formats, BREP and check_printability; export the top-level "
-                "container instead if the moved position matters."
-            )
-
     skipped: list[dict[str, str]] = []
     kept = []
     for obj in objects:
@@ -715,15 +802,19 @@ def _export(doc_name: str, path: str, ext: str, opts: dict[str, Any]) -> dict[st
                 )
             objects = exported
         elif ext in STEP_FORMATS:
-            _export_step(objects, path, ext, opts)
+            with _in_global_place(objects) as placed:
+                _export_step(placed, path, ext, opts)
         elif ext in GLTF_FORMATS:
-            mesh_info = _export_gltf(objects, path, opts)
+            with _in_global_place(objects) as placed:
+                mesh_info = _export_gltf(placed, path, opts)
         elif ext in BREP_FORMATS:
             _export_brep(objects, path)
         elif ext == "dxf":
-            _export_dxf(objects, path)
+            with _in_global_place(objects, keep_parts=False) as placed:
+                _export_dxf(placed, path)
         elif ext == "svg":
-            _export_svg(objects, path)
+            with _in_global_place(objects, keep_parts=False) as placed:
+                _export_svg(placed, path)
         else:
             return fail(INTERNAL_ERROR, f"unhandled export format {ext!r}")
     except Exception as e:

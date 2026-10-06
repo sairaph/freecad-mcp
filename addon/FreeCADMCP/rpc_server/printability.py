@@ -29,7 +29,7 @@ from rpc_server.gui_task import resolve_timeout, run_on_gui
 from rpc_server.lookup import require_document, require_object
 from rpc_server.options import check_options
 from rpc_server.plate import TOUCH_TOLERANCE_MM as _TOUCH_TOLERANCE_MM
-from rpc_server.plate import plate_margins
+from rpc_server.plate import floating_warning, plate_margins
 from rpc_server.serialize import finite_or_none, tight_bound_box, visibility_of
 
 
@@ -194,6 +194,7 @@ def _part(obj: Any, plate: list[float], origin: list[float]) -> dict[str, Any]:
         "free_margin_mm": None,
         "inside": False,
         "issues": [],
+        "warnings": [],
         "overlap_checked_by": None,
         "_shape": None,
         "_box": None,
@@ -226,6 +227,9 @@ def _part(obj: Any, plate: list[float], origin: list[float]) -> dict[str, Any]:
     part["free_margin_mm"] = free
     part["inside"] = not problems
     part["issues"].extend(problems)
+    floating = floating_warning(box)
+    if floating is not None:
+        part["warnings"].append(floating)
     return part
 
 

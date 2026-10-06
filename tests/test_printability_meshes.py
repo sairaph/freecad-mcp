@@ -266,3 +266,22 @@ def test_an_object_with_neither_a_solid_nor_a_mesh_says_so(printability, monkeyp
     reply = check(printability, monkeypatch, Doc(Empty()), ["Empty"])
     assert by_name(reply)["Empty"]["issues"] == ["has no solid or mesh shape to place on the plate"]
     assert reply["printable"] is False
+
+
+def test_a_solid_above_the_plate_floats_as_a_warning_and_the_layout_stays_printable(printability, monkeypatch) -> None:
+    up = Solid("Up", (0, 0, 5, 10, 10, 8))
+    down = Solid("Down", (20, 0, 0, 30, 10, 3))
+    reply = check(printability, monkeypatch, Doc(up, down), ["Up", "Down"])
+    rows = by_name(reply)
+    assert rows["Up"]["issues"] == [] and rows["Up"]["warnings"] == ["floats 5 mm above the plate: it needs slicer supports, or move it down so its lowest point is at z 0"]
+    assert rows["Up"]["bound_box"][2] == 5.0 and rows["Up"]["inside"]
+    assert rows["Down"]["warnings"] == []
+    assert rows["Down"]["issues"] == [] and rows["Down"]["bound_box"][2] == 0.0
+    assert reply["printable"] is True
+
+
+def test_a_part_inside_a_moved_container_floats_by_its_global_height(printability, monkeypatch) -> None:
+    # The container is the part: its own shape is global already, as Part.getShape gives it.
+    holder = Solid("PartA", (20, 20, 5, 60, 50, 8))
+    reply = check(printability, monkeypatch, Doc(holder), ["PartA"])
+    assert by_name(reply)["PartA"]["warnings"][0].startswith("floats 5 mm above the plate")

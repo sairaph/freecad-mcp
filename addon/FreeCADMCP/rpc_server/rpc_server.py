@@ -898,7 +898,7 @@ class FreeCADRPC:
             doc = FreeCAD.getDocument(doc_name)
         except Exception:
             return []
-        return [serialize_object(obj) for obj in doc.Objects]
+        return [serialize_object(obj, integrals=False) for obj in doc.Objects]
 
     def get_object(self, doc_name: str, obj_name: str) -> dict[str, Any] | None:
         return _query_on_gui(

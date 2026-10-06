@@ -195,6 +195,10 @@ func (s *Server) listObjects(ctx context.Context, _ *mcp.CallToolRequest, in doc
 	if err != nil {
 		return s.withNotice(failure(ctx, "list objects", err, "")), nil, nil
 	}
+	leftOut := false
+	if compact {
+		objects, leftOut = withoutOriginMembers(objects)
+	}
 	count := 0
 	if list, ok := objects.([]any); ok {
 		count = len(list)
@@ -202,6 +206,12 @@ func (s *Server) listObjects(ctx context.Context, _ *mcp.CallToolRequest, in doc
 	body := jsonBlock(objects)
 	if table, ok := compactObjectTable(objects); compact && ok {
 		body = table
+		if leftOut {
+			body += "\nOrigin axes and planes are left out: 7 per Origin; list_objects with compact false lists them.\n"
+		}
+	}
+	if !compact && count > 0 {
+		body += "\nVolume, area and centre of mass are left out of this list: get_object gives them for one object.\n"
 	}
 	if count == 0 {
 		body += "\nThe document is empty or not open. Call list_documents to see the open documents."
@@ -228,6 +238,25 @@ func (s *Server) getObject(ctx context.Context, _ *mcp.CallToolRequest, in objec
 	}
 	out := render.SuccessResult(objectFront{Document: in.DocName, Object: in.ObjName}, jsonBlock(object))
 	return s.withNotice(s.screenshot(ctx, conn, out, screenshotOptIn(in.IncludeScreenshot), viewString(in.ViewName), in.DocName)), nil, nil
+}
+
+// withoutOriginMembers drops the rows the addon marks origin_member (the axes,
+// planes and point of an App::Origin) and reports whether it dropped any.
+func withoutOriginMembers(objects any) (any, bool) {
+	list, ok := objects.([]any)
+	if !ok {
+		return objects, false
+	}
+	kept := make([]any, 0, len(list))
+	for _, item := range list {
+		if row, ok := item.(map[string]any); ok {
+			if member, _ := row["origin_member"].(bool); member {
+				continue
+			}
+		}
+		kept = append(kept, item)
+	}
+	return kept, len(kept) != len(list)
 }
 
 // compactObjectTable renders the compact object list (one row per object) as a

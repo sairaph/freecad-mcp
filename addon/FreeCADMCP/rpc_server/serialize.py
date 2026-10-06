@@ -215,15 +215,16 @@ def _center_of_mass(shape, volumes: list[float] | None = None) -> dict | None:
     }
 
 
-def serialize_shape(shape):
+def serialize_shape(shape, integrals=True):
+    """The Shape entry of get_object. ``integrals`` false leaves out Volume, Area
+    and CenterOfMass, the OpenCascade integrals (about 50 ms for each threaded
+    solid), which a list of every object cannot afford."""
     if shape is None:
         return None
     try:
         face_count = len(shape.Faces)
-        volumes = _solid_volumes(shape, face_count)
+        volumes = _solid_volumes(shape, face_count) if integrals else None
         result = {
-            "Volume": finite_or_none(sum(volumes) if volumes is not None else shape.Volume),
-            "Area": finite_or_none(shape.Area),
             "VertexCount": len(shape.Vertexes),
             "EdgeCount": len(shape.Edges),
             "FaceCount": face_count,
@@ -233,8 +234,13 @@ def serialize_shape(shape):
             # loose on curved and swept parts (a thread's came out 30 % wide).
             "BoundBox": bound_box_list(tight_bound_box(shape)),
         }
+        if integrals:
+            result["Volume"] = finite_or_none(sum(volumes) if volumes is not None else shape.Volume)
+            result["Area"] = finite_or_none(shape.Area)
     except Exception as e:
         return {"error": f"invalid shape: {str(e)}"}
+    if not integrals:
+        return result
     try:
         center = _center_of_mass(shape, volumes)
     except Exception:
@@ -276,6 +282,24 @@ def shape_summary(shape):
         return result
     except Exception:
         return None
+
+
+def object_shape_summary(obj):
+    """``shape_summary`` of ``obj``'s shape in global coordinates. An object a
+    container moves also gets ``container`` (its name) and ``local_size``, the
+    size without the container, since a rotated container changes the size."""
+    summary = shape_summary(tessellation.global_shape(obj))
+    if summary is None or summary.get("size") is None:
+        return summary
+    try:
+        container = tessellation.moving_container(obj)
+        if container is not None:
+            box = tight_bound_box(obj.Shape)
+            summary["container"] = container
+            summary["local_size"] = [finite_or_none(v) for v in (box.XLength, box.YLength, box.ZLength)]
+    except Exception:
+        pass
+    return summary
 
 
 def serialize_view_object(view):
@@ -356,16 +380,32 @@ def solid_count_of(obj) -> int | None:
         return 0
 
 
+def _origin_member_names(doc) -> set[str]:
+    """The Name of every axis, plane and point held by an App::Origin of ``doc``
+    (an App::Part's and a PartDesign Body's both)."""
+    names: set[str] = set()
+    for obj in doc.Objects:
+        if getattr(obj, "TypeId", "") != "App::Origin":
+            continue
+        try:
+            names.update(str(member.Name) for member in obj.OriginFeatures)
+        except Exception:
+            pass
+    return names
+
+
 def list_objects_gui(doc_name: str) -> list[dict]:
     """Return the compact object list of ``doc_name`` for get_objects(compact=True).
 
     Runs on the GUI thread. Rows: ``{"name", "label", "type", "state",
-    "valid", "parent", "parents", "solids", "visible"}``; ``[]`` for a document
-    that is not open. ``parent`` (the first) and ``parents`` (every one) come
+    "valid", "parent", "parents", "solids", "visible", "origin_member"}``; ``[]`` for a
+    document that is not open. ``parent`` (the first) and ``parents`` (every one) come
     from ``tessellation.parent_lists``, the same claim logic
     ``tree_root_objects`` uses, so this list's top-level objects (an empty
     "parent") agree with what export_document and check_printability treat
     as top level by default. ``solids`` is None for an object with no Shape.
+    ``origin_member`` is true for the axes, planes and point of an App::Origin,
+    which the MCP server leaves out of the compact table.
     """
     try:
         doc = App.getDocument(doc_name)
@@ -374,6 +414,7 @@ def list_objects_gui(doc_name: str) -> list[dict]:
     if doc is None:
         return []
     parents = tessellation.parent_lists(doc)
+    origin_members = _origin_member_names(doc)
     return [
         {
             "name": obj.Name,
@@ -385,20 +426,43 @@ def list_objects_gui(doc_name: str) -> list[dict]:
             "parents": parents.get(str(getattr(obj, "Name", "")), []),
             "solids": solid_count_of(obj),
             "visible": visibility_of(obj),
+            "origin_member": str(obj.Name) in origin_members,
         }
         for obj in doc.Objects
     ]
 
 
-def serialize_object(obj):
+def _object_shape(obj, integrals=True) -> dict | None:
+    """The Shape entry of get_object: the box and centre are global, and an
+    object a container moves says so and gives its own (local) box too."""
+    result = serialize_shape(tessellation.global_shape(obj), integrals)
+    if not isinstance(result, dict) or "BoundBox" not in result:
+        return result
+    try:
+        container = tessellation.moving_container(obj)
+        subject = "BoundBox and CenterOfMass are" if integrals else "BoundBox is"
+        if container is not None:
+            result["LocalBoundBox"] = bound_box_list(tight_bound_box(obj.Shape))
+            result["BoundBoxNote"] = (
+                f"{subject} global (inside {container}, which moves it); "
+                "LocalBoundBox is the box without the container."
+            )
+    except Exception:
+        pass
+    return result
+
+
+def serialize_object(obj, integrals=True):
+    """``obj`` as get_object shows it. ``integrals`` false (the full object list)
+    leaves out the shape's Volume, Area and CenterOfMass."""
     if isinstance(obj, list):
-        return [serialize_object(item) for item in obj]
+        return [serialize_object(item, integrals) for item in obj]
     elif isinstance(obj, App.Document):
         return {
             "Name": obj.Name,
             "Label": obj.Label,
             "FileName": obj.FileName,
-            "Objects": [serialize_object(child) for child in obj.Objects],
+            "Objects": [serialize_object(child, integrals) for child in obj.Objects],
         }
     else:
         result = {
@@ -412,7 +476,7 @@ def serialize_object(obj):
             "InList": _names(obj, "InList"),
             "Properties": {},
             "Placement": serialize_value(getattr(obj, "Placement", None)),
-            "Shape": serialize_shape(getattr(obj, "Shape", None)),
+            "Shape": _object_shape(obj, integrals),
             "ViewObject": {},
         }
 

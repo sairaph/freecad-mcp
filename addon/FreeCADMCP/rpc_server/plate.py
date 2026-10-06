@@ -8,6 +8,9 @@ what the numbers mean.
 # may reach this far past a plate edge before it counts as outside.
 TOUCH_TOLERANCE_MM = 1e-6
 
+# A part whose lowest point is more than this many mm above the plate floats.
+FLOAT_TOLERANCE_MM = 0.01
+
 
 def plate_margins(
     box: tuple, plate: list[float], origin: list[float]
@@ -40,3 +43,12 @@ def plate_margins(
             problems.append(f"extends past {axis} = {starts[i] + limit:g} (the plate edge) by {-high:.4g} mm")
     free = min(v for k, v in margins.items() if k != "z_low")
     return margins, free, problems
+
+
+def floating_warning(box: tuple) -> str | None:
+    """The warning text for a part whose lowest point is more than
+    ``FLOAT_TOLERANCE_MM`` above the plate (z = 0), else None. A part below the
+    plate is reported by ``plate_margins``."""
+    if box[2] <= FLOAT_TOLERANCE_MM:
+        return None
+    return f"floats {box[2]:.4g} mm above the plate: it needs slicer supports, or move it down so its lowest point is at z 0"
