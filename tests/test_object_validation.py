@@ -387,7 +387,7 @@ def test_create_object_reports_the_shape_and_the_inputs_that_went_hidden() -> No
     with load_object_factory(doc) as object_factory:
         result = object_factory.create_object_gui("Doc", object_factory.Object(name="Clip", type="Part::Cut", properties={}))
 
-    assert result["shape"] == {"solids": 1, "shells": 1, "faces": 6, "edges": 12, "size": [40.0, 20.0, 12.0], "volume": 9503.5}
+    assert result["shape"] == {"solids": 1, "shells": 1, "faces": 6, "edges": 12, "size": [40.0, 20.0, 12.0], "volume": 9503.5, "span": [0.0, 40.0, 0.0, 20.0, 0.0, 12.0]}
     assert result["hidden"] == ["Block", "Hole"]
     assert "warning" not in result
 

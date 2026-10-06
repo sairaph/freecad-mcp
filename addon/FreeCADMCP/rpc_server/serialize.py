@@ -302,6 +302,21 @@ def object_shape_summary(obj):
     return summary
 
 
+def object_shape_span(obj):
+    """The box ``obj``'s shape fills in global coordinates, as ``[xmin, xmax,
+    ymin, ymax, zmin, zmax]`` in mm, or None for a null or unreadable shape."""
+    try:
+        shape = tessellation.global_shape(obj)
+        if shape is None or shape.isNull():
+            return None
+        box = tight_bound_box(shape)
+        if not box.isValid():
+            return None
+        return [finite_or_none(v) for v in (box.XMin, box.XMax, box.YMin, box.YMax, box.ZMin, box.ZMax)]
+    except Exception:
+        return None
+
+
 def serialize_view_object(view):
     if view is None:
         return None

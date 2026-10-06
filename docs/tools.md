@@ -291,19 +291,20 @@ constraints. The reply says how many: `Replaced the geometry and its 4 constrain
 entry with its own size is refused. `update_object` takes `Edges` too. The
 reply lists `Edges now: Edge1 r1.5, Edge2 r1.5.`
 
-`Part::Fillet`, `Part::Chamfer`, `Part::Extrusion`, `Part::Revolution` and
-`Part::Thickness` hide their source object, as FreeCAD's own commands do, so
+`Part::Fillet`, `Part::Chamfer`, `Part::Extrusion`, `Part::Revolution`,
+`Part::Thickness`, `Part::Loft` (`Sections`) and `Part::Sweep` (`Sections` and
+`Spine`) hide their source objects, as FreeCAD's own commands do, so
 the source does not cover the result. Only a source that was visible is
 hidden, nothing is hidden for a failed or invalid object, and `update_object`
 hides the source only when it sets the link again (`Base`, `Source` or
-`Faces`). Mirroring, offsets, lofts and sweeps leave their source shown;
+`Faces`, `Sections` or `Spine`). Mirroring, offsets and ruled surfaces leave their source shown;
 booleans and compounds hide theirs themselves (their view providers do).
 
 The reply of `create_object` and `update_object` names every object that went
 from visible to hidden during the call as a consequence of it: `Hidden: Block, Hole
 (inputs of Clip).` An object hidden by the `Visibility` the call set is not listed: the caller asked for it. For an object with a `Shape` (not a sheet, a FEM object or a
-group) it also gives what the shape holds: `Shape: 1 solid, 40 x 20 x 12 mm,
-volume 9503.5 mm^3` (the tight box; a shape without a solid says `no solid`
+group) it also gives what the shape holds: `Shape: 1 solid, 40 x 20 x 12 mm at x 0 to 40, y 0 to 20, z 0 to 12,
+volume 9503.5 mm^3` (the tight box, then the global box it fills, one decimal, with the `Placement` of every `App::Part` or Body above it applied, as `get_object` gives it; the `Shapes now:` rows keep the short form without it; a shape without a solid says `no solid`
 and counts its shells, faces or edges instead; an object a moved `App::Part` or Body holds gets the global size and the local one beside it: `40 x 6 x 20 mm (global, inside PartA, which moves it; local 40 x 20 x 6 mm)`). When the shape is null or has
 no solid although an input has one (a `Part::Common` of parts that do not
 overlap, a `Part::Cut` whose tool removes the base) the reply adds a warning,
@@ -320,6 +321,12 @@ Base (relative tolerance 1e-3; box, cylinder, sphere, cone and torus pairs, nest
 touching, with refine on and off, never came near it). Types whose result
 is edges or faces by design (section, slice, cross sections, projection, 2D
 offset) give no warning.
+
+A number given for a length or angle property that FreeCAD stored as another
+value (clamped or replaced, compared in mm or degrees, relative tolerance 1e-6)
+adds one line per property: `Angle1: given -90, FreeCAD stored 0 (outside the
+range it allows).` Expressions and strings with units are not compared
+(`adjusted` in the JSON).
 
 Any other Python-implemented type must be built with `execute_code` instead.
 The Draft factories name objects themselves, so for those the returned object
@@ -1498,6 +1505,10 @@ over 2 seconds and adds `cpu_cores`; `busy: true` (about 0.5 cores or more)
 means FreeCAD is computing, not stuck behind a dialog, and the advice is to
 wait and poll again. The last known documents say how long ago they were read;
 the reading is refreshed after every create, open, close, import and save as.
+
+The reply says whether sharing is on (`Sharing is on: one agent at a time holds
+FreeCAD.`) or off (`Sharing is off: agents on this computer share FreeCAD
+without a lock.`).
 
 With [remote access](remote-access.md) on, the reply also carries
 `session_lock` (`off`, `free`, `yours` or `other`; `unknown` while FreeCAD is

@@ -22,6 +22,7 @@ from PySide import QtCore
 from rpc_server import request_context, session_lock
 from rpc_server.agent_log import agent_error, agent_warning, quiet_notifications
 from rpc_server.commands import register_commands
+from rpc_server.console_windows import install as hide_child_consoles
 from rpc_server.errors import CONFLICT, FREECAD_ERROR, INVALID_INPUT, NOT_FOUND, fail, tool_call
 from rpc_server.fem_executor import run_fem_analysis as _run_fem_analysis
 from rpc_server.gui_dispatch import (
@@ -1255,6 +1256,7 @@ def _apply_settings(settings: dict[str, Any]) -> None:
 def start_rpc_server(port: int = 9875) -> str:
     global rpc_server_thread, rpc_server_instance
 
+    hide_child_consoles()
     if rpc_server_instance:
         host, bound_port = rpc_server_instance.server_address
         return f"RPC Server already running at {host}:{bound_port} (PID {os.getpid()})."

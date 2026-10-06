@@ -69,6 +69,17 @@ A cantilever clip: a beam with a hook that flexes past a lip and snaps back. No 
 - Window clearance around the hook: the material file's latch gap (PETG 0.5 per side); 0.3 per side on faces that do not lock.
 - Worked PETG example: t 1.6, L 16, width 8, undercut 1.0. Strain = 1.5 * 1.6 * 1.0 / 256 = 0.94 %, under the 2 %. The largest undercut at 2 % is 0.02 * 256 / 2.4 = 2.1.
 
+## Lofts and sweeps
+
+Build a solid from profiles with create_object. Part::Circle, Part::Ellipse, sketches and Draft profiles all work.
+
+- Part::Loft {"Sections": ["Circle", "Ellipse"], "Solid": true}. Put the sections in parallel planes with their Placement. Ruled false gives a smooth loft, true gives straight faces between sections.
+- A hollow loft is an outer loft cut by an inner loft offset by the wall thickness (Part::Cut).
+- Part::Sweep {"Sections": ["Profile"], "Spine": ["Path", ["Edge1"]], "Solid": true}. Spine is [path object, [edges]] or the object. Frenet true for a helix or any 3D path.
+- Part::Extrusion {"Base": "Profile", "Dir": {"x": 0, "y": 0, "z": 10}, "Solid": true}.
+- The reply names the profiles it hid.
+- Part::Circle Angle1 and Angle2 take 0 to 360. Rotate the Placement for other arcs. The reply says when FreeCAD stored another value.
+
 ## Text
 
 Emboss or engrave text with Draft::ShapeString.
@@ -80,6 +91,7 @@ Emboss or engrave text with Draft::ShapeString.
 - Height at least 5, bold; 10 reads reliably. Stroke at least 2 x the nozzle (0.8, 1.0 is safer). Normal letter spacing.
 - Emboss 0.4 to 0.6. Engrave 0.6, or 0.6 to 1.0 for contrast. Engraving prints more reliably than embossing.
 - Text on a vertical wall resolves less well across the layers: make it larger there.
+- Text on a curved wall: Part::Common of the text prism with a skin, the outer shape minus the same shape shrunk by the depth.
 
 ## Edges to round
 

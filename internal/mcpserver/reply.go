@@ -778,12 +778,43 @@ func shapeText(shape map[string]any) string {
 			}
 			text += ")"
 		}
+		if span, ok := shape["span"].([]any); ok && len(span) == 6 {
+			text += " at " + spanText(span)
+		}
 		parts = append(parts, text)
 	}
 	if volume, ok := number(shape["volume"]); ok {
 		parts = append(parts, fmt.Sprintf("volume %.1f mm^3", volume))
 	}
 	return strings.Join(parts, ", ")
+}
+
+// spanText renders the global box a shape fills, [xmin, xmax, ymin, ymax, zmin,
+// zmax] in mm, as "x 30.5 to 37.5, y -3.5 to 3.5, z 0 to 5".
+func spanText(span []any) string {
+	parts := make([]string, 3)
+	for i, axis := range []string{"x", "y", "z"} {
+		low, _ := number(span[2*i])
+		high, _ := number(span[2*i+1])
+		parts[i] = fmt.Sprintf("%s %s to %s", axis, formatNumber(math.Round(low*10)/10+0), formatNumber(math.Round(high*10)/10+0))
+	}
+	return strings.Join(parts, ", ")
+}
+
+// adjustedNote says which numbers FreeCAD stored as something else than what
+// the call gave, one line each.
+func adjustedNote(body string, res map[string]any) string {
+	rows, _ := res["adjusted"].([]any)
+	for _, item := range rows {
+		row, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		stored, _ := number(row["stored"])
+		body += fmt.Sprintf("\n\n%s: given %s, FreeCAD stored %s (outside the range it allows).",
+			str(row, "name"), formatNumber(row["given"]), formatNumber(math.Round(stored*1e6)/1e6+0))
+	}
+	return body
 }
 
 // staleNote says which objects were not rebuilt because an object they depend
