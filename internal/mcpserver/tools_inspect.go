@@ -199,12 +199,29 @@ func (s *Server) listSubelements(ctx context.Context, _ *mcp.CallToolRequest, in
 		}
 		body.WriteString(subelementTable("edges", "curve", "length mm", edges, edgeDetails, noRowsText("edges", res["edge_count"], filters)))
 	}
+	if kind == "all" && facesUnfiltered(filters) {
+		body.WriteString("\nFaces are not filtered: curve, along, smooth and min_length apply to edges (surface and on_bottom apply to faces).")
+	}
 	body.WriteString("\nPass a name as a measure ref's sub, or in a References entry such as {\"object_name\": " +
 		fmt.Sprintf("%q", in.ObjName) + ", \"face\": \"Face1\"}.")
 	return s.withNotice(render.SuccessResult(front, body.String())), nil, nil
 }
 
 func intPtr(n int) *int { return &n }
+
+// facesUnfiltered reports whether the filters given are all edge filters, so a
+// list of both kinds still holds every face.
+func facesUnfiltered(filters map[string]any) bool {
+	if len(filters) == 0 {
+		return false
+	}
+	for name := range filters {
+		if name == "surface" || name == "on_bottom" {
+			return false
+		}
+	}
+	return true
+}
 
 // listSubelementsSchema is the input schema of list_subelements with the enums of its filters.
 func listSubelementsSchema() *jsonschema.Schema {

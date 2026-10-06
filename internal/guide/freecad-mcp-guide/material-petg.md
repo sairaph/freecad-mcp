@@ -52,6 +52,15 @@ Design rules for FDM parts in PETG with a 0.4 mm nozzle. Sizes in mm. "Per side"
 - Large parts need a flat base at least 1 thick to come off the bed whole.
 - Sliding faces stick: narrow the contact to ribs.
 
+## FEM
+
+- Use the brand's datasheet when the user has one. Otherwise, for a solid (100 % infill) PETG part, isotropic: {"Name": "PETG", "YoungsModulus": "1.5 GPa", "PoissonRatio": 0.39, "Density": "1270 kg/m^3"}. The Poisson's ratio is assumed.
+- Strength: about 47 MPa along the layers and about 40 MPa across them at best. These are best-case datasheet values; a real part is weaker across layers.
+- Check the stress against strength divided by a safety factor of 2 to 3 along the layers and 4 or more where the load pulls layers apart.
+- Linear FEM shows neither creep nor heat softening. A part held under load for long (above about 30 % of its strength) needs margin beyond the result.
+- Sparse infill: these numbers do not apply. Check only the walls, or ask for solid infill.
+- The result is a check, not a guarantee. Read fem.md.
+
 ## Test coupon
 
 Print these small samples on the user's printer before large parts, then set the Params cells to the ones that fit best:

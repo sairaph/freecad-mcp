@@ -74,7 +74,7 @@ func TestHollowPartJobFollowsTheFeedbackOfTheTools(t *testing.T) {
 		"degenerate (no length, a pole of a rounded corner): never pick it", "on the bottom")
 
 	must(t, call(t, cs, "check_printability", map[string]any{"doc_name": doc, "object_names": []string{"Hollow"}, "bed_x": 80, "bed_y": 60, "bed_z": 50}),
-		"free margin to the plate edges 0 mm", "z max 20")
+		"free margin to the plate edges 0 mm", "20 mm of build height left")
 
 	must(t, call(t, cs, "get_view", map[string]any{"width": 800}), "Image: 800 x ")
 

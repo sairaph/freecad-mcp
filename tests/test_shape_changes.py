@@ -43,7 +43,7 @@ def sc(monkeypatch):
     def object_shape_summary(obj):
         shape = obj.Shape
         summaries.append(shape.token)
-        return {"solids": 1, "size": [1.0, 2.0, 3.0], "volume": float(shape.token)}
+        return {"solids": 1, "size": [1.0, 2.0, 3.0], "volume": float(getattr(obj, "vol", shape.token))}
 
     serialize.object_shape_summary = object_shape_summary
     monkeypatch.setitem(sys.modules, "rpc_server.serialize", serialize)
@@ -150,3 +150,69 @@ def test_an_input_that_changed_without_changing_its_boolean_reports_nothing(sc) 
     before = sc.snapshot(doc)
     box.Shape = Shape(20)
     assert sc.changed_shapes(doc, before) == {}
+
+
+def test_a_hole_resized_inside_the_same_box_is_listed_and_a_rebuild_to_identical_geometry_is_not(sc) -> None:
+    plate = Obj("Plate", 1)
+    plate.vol = 100.0
+    doc = doc_of(plate)
+    sc.tess.parents = {}
+
+    def rebuild(token, volume):
+        before = sc.snapshot(doc)
+        plate.Shape, plate.vol = Shape(token), volume
+        return sc.changed_shapes(doc, before)
+
+    # Nothing was summarised for it yet: listed, and remembered.
+    assert [r["name"] for r in rebuild(2, 100.0)["changed_shapes"]] == ["Plate"]
+    # The hole grew: same box, smaller volume.
+    found = rebuild(3, 90.0)
+    assert [r["name"] for r in found["changed_shapes"]] == ["Plate"] and found["changed_shapes"][0]["shape"]["volume"] == 90.0
+    # Rebuilt to the same geometry (a touched object, an undone and redone step): nothing to say.
+    assert rebuild(4, 90.0) == {}
+    assert rebuild(5, 90.04) == {}  # equal as the Shape line shows it (0.1 mm^3)
+    assert [r["name"] for r in rebuild(6, 90.2)["changed_shapes"]] == ["Plate"]
+
+
+def test_a_summary_the_reply_of_a_create_or_update_showed_counts_as_the_stored_one(sc) -> None:
+    plate = Obj("Plate", 1)
+    plate.vol = 100.0
+    doc = doc_of(plate)
+    sc.tess.parents = {}
+    sc.remember_summaries([(plate, {"solids": 1, "size": [1.0, 2.0, 3.0], "volume": 100.0})])
+    before = sc.snapshot(doc)
+    plate.Shape = Shape(9)  # rebuilt, same summary
+    assert sc.changed_shapes(doc, before) == {}
+
+
+def test_stored_summaries_of_closed_documents_and_deleted_objects_are_dropped(sc, monkeypatch) -> None:
+    kept, gone = Obj("Kept", 1), Obj("Gone", 2)
+    kept.Document = types.SimpleNamespace(Name="Open")
+    gone.Document = types.SimpleNamespace(Name="Open")
+    other = Obj("Other", 3)
+    other.Document = types.SimpleNamespace(Name="Closed")
+    summary = {"solids": 1, "size": [1.0, 1.0, 1.0], "volume": 1.0}
+    sc._summaries.update({("Closed", "Other"): ("x",), ("Open", "Gone"): ("x",)})
+    document = types.SimpleNamespace(getObject=lambda name: kept if name == "Kept" else None)
+    freecad = types.ModuleType("FreeCAD")
+    freecad.listDocuments = lambda: {"Open": document}
+    monkeypatch.setitem(sys.modules, "FreeCAD", freecad)
+    sc.remember_summaries([(kept, summary)])
+    assert sorted(sc._summaries) == [("Open", "Kept")]
+
+
+def test_summaries_stop_at_the_row_cap_and_the_store_is_pruned_once_for_the_call(sc, monkeypatch) -> None:
+    objects = [Obj(f"B{i}", i) for i in range(5)]
+    doc = doc_of(*objects)
+    sc.tess.parents = {}
+    pruned = []
+    monkeypatch.setattr(sc, "prune_missing", lambda store: pruned.append(len(store)))
+    before = sc.snapshot(doc)
+    for o in objects:
+        o.Shape = Shape(100 + int(o.Name[1:]))
+    found = sc.changed_shapes(doc, before)
+    assert len(found["changed_shapes"]) == 2 and found["changed_shapes_count"] == 5 and found["changed_shapes_truncated"] is True
+    assert sc.summaries == [100, 101]  # the other three were never summarised
+    assert len(pruned) == 1
+    sc.remember_summaries([(objects[0], {"solids": 1, "size": [1.0, 1.0, 1.0], "volume": 1.0}), (objects[1], {"solids": 1, "size": [1.0, 1.0, 1.0], "volume": 1.0})])
+    assert len(pruned) == 2  # once for the two of a create or update, not once each

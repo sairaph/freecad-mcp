@@ -7,7 +7,7 @@ Solve a static stress problem with CalculiX. Create every FEM object with create
 1. The solid exists. Note its object name, for example Body.
 2. Create the analysis:
    {"obj_type": "Fem::AnalysisPython", "obj_name": "Analysis"}
-3. Create the material:
+3. Create the material. For a printed part take the values from the FEM section of its material file (material-petg.md, material-pla.md), not from steel:
    {"obj_type": "Fem::MaterialCommon", "obj_name": "Steel", "analysis_name": "Analysis", "obj_properties": {"Material": {"Name": "Steel", "YoungsModulus": "210 GPa", "PoissonRatio": 0.3, "Density": "7900 kg/m^3"}}}
 4. Create the mesh. It is generated when created, second order:
    {"obj_type": "Fem::FemMeshGmsh", "obj_name": "Mesh", "analysis_name": "Analysis", "obj_properties": {"Shape": "Body", "CharacteristicLengthMax": 5, "CharacteristicLengthMin": 1}}
@@ -46,6 +46,7 @@ Solve a static stress problem with CalculiX. Create every FEM object with create
 - To look at the result, keep the solid hidden (the run hides it) and use set_view isolate on the result object, not on the solid: a shown solid covers the colours.
 - The colours need a 3D view. Without one the reply carries only the numbers.
 - Compare max von Mises stress with the yield strength of the material. Report the ratio.
+- For a printed part the strength is the material file's, along or across the layers, divided by its safety factor.
 - Tell the user the load, the material and the mesh size with the result.
 
 ## Errors

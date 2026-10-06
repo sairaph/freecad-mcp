@@ -74,6 +74,7 @@ print(bolt.isValid(), len(bolt.Solids), bolt.Volume, round(bolt.Volume / expecte
 - A valid shape can still have lost a part. Compare the volume with the expected one after the thread and after any boolean on the bolt (a Cut into a nut body, a MultiFuse with other parts). create_object and recompute_document warn when a Fuse, Common or Cut has a volume its inputs rule out.
 - Save the result with Shape.exportBrep(path) or into a document, then load it in the GUI with execute_code or reload_document.
 - Leave clearance of 0.2 to 0.4 mm between a printed thread and its nut.
+- A printed screw and nut: cut the nut thread with the screw's own thread (the same helix and profile, the profile grown by the clearance) so the phases match. Never build the two helices separately.
 
 ## Rounding edges
 

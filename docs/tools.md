@@ -62,7 +62,7 @@ The reply carries the name FreeCAD gave the document (not always exactly
 
 List every open document with its label, file, whether it has unsaved changes
 or needs a recompute, whether it is active, and its views (tabs) with their
-index. Takes no arguments.
+index. Takes no arguments. A `*` in the views column marks the active view, and the reply says so.
 
 The reply is a table of name, label, file, modified, active and views; an
 empty list says to call `create_document` or `open_document`. Use it first to
@@ -277,8 +277,8 @@ hides the source only when it sets the link again (`Base`, `Source` or
 booleans and compounds hide theirs themselves (their view providers do).
 
 The reply of `create_object` and `update_object` names every object that went
-from visible to hidden during the call, whoever hid it: `Hidden: Block, Hole
-(inputs of Clip).` For an object with a `Shape` (not a sheet, a FEM object or a
+from visible to hidden during the call as a consequence of it: `Hidden: Block, Hole
+(inputs of Clip).` An object hidden by the `Visibility` the call set is not listed: the caller asked for it. For an object with a `Shape` (not a sheet, a FEM object or a
 group) it also gives what the shape holds: `Shape: 1 solid, 40 x 20 x 12 mm,
 volume 9503.5 mm^3` (the tight box; a shape without a solid says `no solid`
 and counts its shells, faces or edges instead; an object a moved `App::Part` or Body holds gets the global size and the local one beside it: `40 x 6 x 20 mm (global, inside PartA, which moves it; local 40 x 20 x 6 mm)`). When the shape is null or has
@@ -346,7 +346,9 @@ The same forms apply to `create_object` and `update_object`:
 - A string map property, such as the `Material` of `Fem::MaterialCommon`, takes
   numbers as well as strings: `{"Material": {"Name": "Steel", "YoungsModulus":
   "210 GPa", "PoissonRatio": 0.3, "Density": "7900 kg/m^3"}}`. FreeCAD stores
-  each value as text.
+  each value as text. The reply of `create_object` and `update_object` echoes what
+  was stored: `Material Alu: YoungsModulus 70 GPa, PoissonRatio 0.33, Density 2700
+  kg/m^3`.
 - A dotted name sets one part of a compound property and leaves the rest:
   `{"Placement.Base.z": 5}`, `{"Placement.Rotation.Angle": 30}` (degrees). It
   reads the property, changes the part and assigns it back. `Rotation.Angle`
@@ -415,7 +417,14 @@ and their compound (101 objects, 700 faces): taking the snapshot 1.9 ms, a no-op
 comparison 2.0 ms; one block changed gave one row for the compound, 128 ms
 of which 120 ms is the summary's volume (the same summary `create_object` runs),
 against 181 ms for recomputing the document. A shape that was rebuilt to the same
-geometry (an undone and redone step, a touched object) counts as changed.
+geometry (an undone and redone step, a touched object) is a changed hash, but it is not listed when its
+summary equals the last one the tool computed for that object, as the `Shape:` line shows it (solid, shell,
+face and edge counts, the size to 0.01 mm, the volume to 0.1 mm^3), so one sheet cell that rebuilds thirty
+parts lists the few that moved, grew or were drilled larger inside the same box. The tool keeps that
+summary for each object of each open document (taken from the replies of `create_object`, `update_object`
+and this list, and dropped the next time one is stored after the document closes or the object is
+deleted); an object it never
+summarised is always listed, once.
 
 ### `delete_object`
 
@@ -557,7 +566,9 @@ the document and changes nothing.
 `curve`, `along`, `smooth` and `min_length` filter edges and `surface` filters faces; `on_bottom` filters both.
 A filter for the other kind is refused with `kind` faces or edges and applies only to its own list with `all`.
 The frontmatter keeps the total as `faces` and `edges` and adds `faces_matched` and `edges_matched`; with no
-filter the reply is unchanged. Nothing matching says `No edges match the filters (the shape has 12).` The join
+filter the reply is unchanged. With `kind` `all` and only edge filters (not `surface` or `on_bottom`) every face is
+listed and the reply says `Faces are not filtered: curve, along, smooth and min_length apply to edges (surface and
+on_bottom apply to faces).` Nothing matching says `No edges match the filters (the shape has 12).` The join
 that makes an edge `smooth` is the costly part of the edge list, so it is worked out only for edges that passed
 every other filter.
 
@@ -863,7 +874,7 @@ differs), its size (tight bounding box), its z range (`z 0 to 3`), its free marg
 (the distance from the nearest side of its box to a plate edge in x and y, and
 to the build height when `bed_z` is given; the side that sits on the plate is
 not counted; a sign shows only when the part is outside) followed by the
-margin to each side, `(x 10 / 186, y 10 / 206)`, with `z max N` added when
+margin to each side, `(x 10 / 186, y 10 / 206)`, with `N mm of build height left` (`exceeds the build height by N mm` when it is negative) added when
 `bed_z` is given, and which parts it
 overlaps. Space the parts apart before calling it: overlapping complex parts,
 such as threads, make the intersection slow. Overlap of two solids is the volume

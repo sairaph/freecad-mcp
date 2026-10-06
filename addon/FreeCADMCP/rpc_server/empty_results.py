@@ -107,17 +107,17 @@ def _fingerprint(obj: Any) -> tuple | None:
     return tuple(key)
 
 
-def _prune_verdicts() -> None:
-    """Drop the verdicts of documents that are closed and of objects that are
+def prune_missing(store: dict) -> None:
+    """Drop the entries of ``store`` (keyed by (document, object) name) of documents that are closed and of objects that are
     gone from an open one."""
     try:
         import FreeCAD
 
         documents = FreeCAD.listDocuments()
-        for key in list(_verdicts):
+        for key in list(store):
             document = documents.get(key[0])
             if document is None or document.getObject(key[1]) is None:
-                del _verdicts[key]
+                del store[key]
     except Exception:
         pass
 
@@ -178,7 +178,7 @@ def empty_result(obj: Any, volume: float | None = None) -> tuple[str, str] | Non
             return cached[1]
         verdict = _volume_verdict(obj, inputs, _Volumes({str(obj.Name): volume} if volume is not None else {}))
         if None not in hashes:
-            _prune_verdicts()
+            prune_missing(_verdicts)
             _verdicts[key] = (hashes, verdict)
         return verdict
     except Exception:
