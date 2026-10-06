@@ -40,15 +40,16 @@ def sc(monkeypatch):
     summaries = []
     serialize = types.ModuleType("rpc_server.serialize")
 
-    def shape_summary(shape):
+    def object_shape_summary(obj):
+        shape = obj.Shape
         summaries.append(shape.token)
         return {"solids": 1, "size": [1.0, 2.0, 3.0], "volume": float(shape.token)}
 
-    serialize.shape_summary = shape_summary
+    serialize.object_shape_summary = object_shape_summary
     monkeypatch.setitem(sys.modules, "rpc_server.serialize", serialize)
     tess = types.ModuleType("rpc_server.tessellation")
-    tess.roots = None
-    tess.tree_root_objects = lambda doc: [o for o in doc.Objects if o.Name in tess.roots]
+    tess.parents = {}
+    tess.parent_map = lambda doc: tess.parents
     monkeypatch.setitem(sys.modules, "rpc_server.tessellation", tess)
     validation = types.ModuleType("rpc_server.object_validation")
     validation.MAX_LISTED_OBJECTS = 2
@@ -61,12 +62,12 @@ def sc(monkeypatch):
 
 
 def doc_of(*objects):
-    return types.SimpleNamespace(Objects=list(objects))
+    return types.SimpleNamespace(Objects=list(objects), getObject=lambda name: next((o for o in objects if o.Name == name), None))
 
 
 def test_a_call_that_rebuilt_nothing_reports_nothing_and_computes_no_summary(sc) -> None:
     doc = doc_of(Obj("Body", 1), Obj("Pad", 2), Obj("Sheet"))
-    sc.tess.roots = {"Body", "Sheet"}
+    sc.tess.parents = {"Pad": "Body"}
     before = sc.snapshot(doc)
     assert before == {"Body": 1, "Pad": 2, "Sheet": None}
     assert sc.changed_shapes(doc, before) == {}
@@ -76,7 +77,7 @@ def test_a_call_that_rebuilt_nothing_reports_nothing_and_computes_no_summary(sc)
 def test_only_top_level_objects_whose_shape_changed_get_a_summary(sc) -> None:
     body, pad, other = Obj("Body", 1), Obj("Pad", 2), Obj("Other", 3)
     doc = doc_of(body, pad, other)
-    sc.tess.roots = {"Body", "Other"}
+    sc.tess.parents = {"Pad": "Body"}
     before = sc.snapshot(doc)
     body.Shape, pad.Shape = Shape(10), Shape(20)  # the Body and the Pad inside it were rebuilt
     found = sc.changed_shapes(doc, before)
@@ -88,7 +89,7 @@ def test_only_top_level_objects_whose_shape_changed_get_a_summary(sc) -> None:
 def test_a_new_object_counts_and_a_removed_one_does_not(sc) -> None:
     kept, gone = Obj("Kept", 1), Obj("Gone", 2)
     doc = doc_of(kept, gone)
-    sc.tess.roots = {"Kept", "Gone", "New"}
+    sc.tess.parents = {}
     before = sc.snapshot(doc)
     doc.Objects = [kept, Obj("New", 5)]
     assert [r["name"] for r in sc.changed_shapes(doc, before)["changed_shapes"]] == ["New"]
@@ -97,7 +98,7 @@ def test_a_new_object_counts_and_a_removed_one_does_not(sc) -> None:
 def test_the_list_is_capped_with_the_true_count(sc) -> None:
     objects = [Obj(f"B{i}", i) for i in range(5)]
     doc = doc_of(*objects)
-    sc.tess.roots = {o.Name for o in objects}
+    sc.tess.parents = {}
     before = sc.snapshot(doc)
     for o in objects:
         o.Shape = Shape(100 + int(o.Name[1:]))
@@ -113,8 +114,8 @@ def test_a_null_or_unreadable_shape_is_not_a_signature_and_a_failure_reports_not
     assert sc.snapshot(doc_of(null, broken)) == {"Null": None, "Broken": None}
     assert sc.snapshot(types.SimpleNamespace()) is None
     assert sc.changed_shapes(doc_of(null), None) == {}
-    sc.tess.roots = {"A"}
-    sc.tree_root_objects = lambda _d: (_ for _ in ()).throw(RuntimeError("tree"))
+    sc.tess.parents = {}
+    sc.parent_map = lambda _d: (_ for _ in ()).throw(RuntimeError("tree"))
     doc = doc_of(Obj("A", 1))
     assert sc.changed_shapes(doc, {"A": 0}) == {}
 
@@ -122,9 +123,30 @@ def test_a_null_or_unreadable_shape_is_not_a_signature_and_a_failure_reports_not
 def test_excluded_objects_are_left_out_of_the_report(sc) -> None:
     own, body = Obj("Pad", 1), Obj("Body", 2)
     doc = doc_of(own, body)
-    sc.tess.roots = {"Pad", "Body"}
+    sc.tess.parents = {"Pad": "Body"}
     before = sc.snapshot(doc)
     own.Shape, body.Shape = Shape(10), Shape(20)
     found = sc.changed_shapes(doc, before, {"Pad"})
     assert [r["name"] for r in found["changed_shapes"]] == ["Body"] and found["changed_shapes_count"] == 1
     assert sc.changed_shapes(doc, before, {"Pad", "Body"}) == {}
+
+
+def test_a_member_of_a_shapeless_container_is_reported_and_its_body_stands_for_its_features(sc) -> None:
+    part, body, pad, leaf = Obj("PartA"), Obj("Body", 1), Obj("Pad", 2), Obj("Leaf", 3)
+    doc = doc_of(part, body, pad, leaf)
+    sc.tess.parents = {"Body": "PartA", "Pad": "Body", "Leaf": "PartA"}
+    before = sc.snapshot(doc)
+    body.Shape, pad.Shape, leaf.Shape = Shape(10), Shape(20), Shape(30)
+    found = sc.changed_shapes(doc, before)
+    assert [r["name"] for r in found["changed_shapes"]] == ["Body", "Leaf"]
+    assert found["changed_shapes_count"] == 2
+    assert sc.summaries == [10, 30]
+
+
+def test_an_input_that_changed_without_changing_its_boolean_reports_nothing(sc) -> None:
+    cut, box = Obj("Cut", 1), Obj("Box", 2)
+    doc = doc_of(cut, box)
+    sc.tess.parents = {"Box": "Cut"}
+    before = sc.snapshot(doc)
+    box.Shape = Shape(20)
+    assert sc.changed_shapes(doc, before) == {}

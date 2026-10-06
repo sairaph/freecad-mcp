@@ -27,7 +27,7 @@ from rpc_server.fem_loads import load_info
 from rpc_server import partdesign
 from rpc_server.property_mapper import FILLET_TYPES, Object, fillet_edges_text, quantity_values, reject_app_link, set_object_property
 from rpc_server.object_validation import failed_names, newly_failed_report, object_validity_error, stale_dependents
-from rpc_server.serialize import shape_summary
+from rpc_server.serialize import object_shape_summary
 from rpc_server.shape_changes import changed_shapes, snapshot
 from rpc_server.source_visibility import hide_sources, newly_hidden, visibility_snapshot
 from rpc_server.transactions import active_document, transaction
@@ -369,7 +369,7 @@ def _shape_fields(obj: Any) -> dict[str, Any]:
     if obj.TypeId == partdesign.SKETCH_TYPE and getattr(obj, "GeometryCount", None) == 0:
         # "no geometry yet" is in the sketch fields; a null shape here reads as a failure.
         return {}
-    summary = shape_summary(obj.Shape)
+    summary = object_shape_summary(obj)
     if summary is None:
         return {}
     if summary.get("null") and hasattr(obj, "Group") and not obj.Group:
@@ -531,6 +531,8 @@ def create_object_gui(doc_name: str, obj: Object):
             if _reading("the mesh type", lambda: is_gmsh(created), False):
                 extra.update(_reading("the mesh", lambda: {"mesh": mesh_info(created)}, {}))
             extra.update(_partdesign_fields(created, plan))
+            if obj.type.startswith("Draft::"):
+                extra["notes"] = [*extra.get("notes", []), f"{obj.type} is a flat profile: extrude it with Part::Extrusion to make a solid."]
             if not problem:
                 _reading("which sources to hide", lambda: hide_sources(created, None), None)
                 extra.update(_reading("the shape", lambda: _shape_fields(created), {}))

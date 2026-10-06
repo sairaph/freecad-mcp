@@ -5,8 +5,9 @@ A sheet cell, an undo or a delete changes shapes the caller never touched
 directly, and nothing in the reply said so. A snapshot before the call holds
 the hash of every object's shape (one O(1) read per object, no volume or
 topology walk); after the call only the objects whose hash changed are
-looked at: the top-level ones (as the tree shows them, so a Body counts once
-and its features not at all) get a shape summary. A call that rebuilt nothing
+looked at: the topmost ones that have a shape (as the tree shows them, so a Body
+counts once and its features not at all, and a member of an App::Part, which has
+no shape, counts itself, placed as the Part puts it) get a shape summary. A call that rebuilt nothing
 reports nothing.
 """
 
@@ -14,8 +15,8 @@ from typing import Any
 
 from rpc_server.agent_log import agent_warning
 from rpc_server.object_validation import MAX_LISTED_OBJECTS
-from rpc_server.serialize import shape_summary
-from rpc_server.tessellation import tree_root_objects
+from rpc_server.serialize import object_shape_summary
+from rpc_server.tessellation import parent_map
 
 
 def _signature(obj: Any) -> int | None:
@@ -41,9 +42,22 @@ def snapshot(doc: Any) -> dict[str, int | None] | None:
         return None
 
 
+def _top_shaped(doc: Any, obj: Any, parents: dict[str, str]) -> str:
+    """The Name of the highest object above ``obj`` (itself included) that has a
+    shape: a Body for its feature, a Cut for its input, the top-level object
+    otherwise. An App::Part has no shape, so the walk stops below it."""
+    node = obj
+    for _ in range(len(parents) + 1):
+        parent = doc.getObject(parents[str(node.Name)]) if str(node.Name) in parents else None
+        if parent is None or _signature(parent) is None:
+            break
+        node = parent
+    return str(node.Name)
+
+
 def changed_shapes(doc: Any, before: dict[str, int | None] | None, exclude: Any = ()) -> dict[str, Any]:
     """``{"changed_shapes": [{"name", "shape"}], "changed_shapes_count",
-    "changed_shapes_truncated"}`` for the top-level objects whose shape changed
+    "changed_shapes_truncated"}`` for the topmost shaped objects whose shape changed
     since ``before`` (an object that is new counts), or ``{}`` when none did
     or it could not be read. ``exclude`` names objects to leave out, such as
     the one a create_object or update_object call is about, which has its own
@@ -59,14 +73,16 @@ def changed_shapes(doc: Any, before: dict[str, int | None] | None, exclude: Any 
         }
         if not changed:
             return {}
+        parents = parent_map(doc)
+        reported = {name for name in (_top_shaped(doc, obj, parents) for obj in changed.values()) if name in changed}
         rows = []
         count = 0
-        for obj in tree_root_objects(doc):
-            if str(obj.Name) not in changed:
+        for obj in doc.Objects:
+            if str(obj.Name) not in reported:
                 continue
             count += 1
             if len(rows) < MAX_LISTED_OBJECTS:
-                summary = shape_summary(obj.Shape)
+                summary = object_shape_summary(obj)
                 if summary is not None:
                     rows.append({"name": str(obj.Name), "shape": summary})
         if not count:

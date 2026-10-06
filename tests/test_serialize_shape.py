@@ -208,3 +208,12 @@ def test_the_tools_own_bookkeeping_properties_are_not_serialized():
     assert "McpMeshedShape" not in str(result)
     # The name the FEM code stores its record under is the one left out.
     assert "McpMeshedShape" in serialize.INTERNAL_PROPERTIES
+
+
+def test_the_integrals_can_be_left_out_and_the_cheap_fields_stay():
+    result = serialize.serialize_shape(_GoodShape(), integrals=False)
+    assert "Volume" not in result and "Area" not in result and "CenterOfMass" not in result
+    assert result["FaceCount"] == 4 and result["SolidCount"] == 1
+    assert result["BoundBox"] == [0.0, 0.0, 0.0, 1.0, 2.0, 3.0]
+    full = serialize.serialize_shape(_GoodShape())
+    assert full["Volume"] == 42.0 and full["Area"] == 10.0 and full["CenterOfMass"] == {"x": 0.5, "y": 1.0, "z": 1.5}

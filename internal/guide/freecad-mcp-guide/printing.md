@@ -14,7 +14,8 @@ Print each part in the pose it prints in. Lay every part flat on the plate with 
 - Set the pose with update_object on Placement, or in execute_code with the part's Placement.
 - A part is laid flat by rotating it about a horizontal axis by an angle that is not 0, then moving it so its lowest point is z 0.
 - A part that must not be laid flat because of its layers (a thin tab, a clip) is rotated to the pose the user names.
-- Parts that were modelled in an assembly pose keep that pose in the assembly; make a second document or copies for the plate layout.
+- Parts that were modelled in an assembly pose keep that pose in the assembly; make a copy of the document for the plate layout. Read assembly.md.
+- A part prints best with its lowest point at z 0. check_printability warns when a part is above z 0 ("floats 5 mm above the plate: it needs slicer supports, or move it down so its lowest point is at z 0") and printable stays true: the slicer can support it. Move it down unless the user wants it raised.
 - For a second plate laid beside the first, keep its parts inside that plate's own rectangle and call check_printability with the same bed_x and bed_y and the plate's corner in bed_origin_x and bed_origin_y.
 
 ## Round edges
@@ -31,14 +32,14 @@ Print each part in the pose it prints in. Lay every part flat on the plate with 
 
 Call check_printability before every export for a printer, with bed_x and bed_y in mm (bed_z for the build height).
 
-It reports per part its tight size, its free margin to each plate edge, and which parts it overlaps. It does no meshing, so it is fast. It checks solids and meshes.
+It reports per part its tight size, its z range ("z 0 to 3"), its free margin to each plate edge, and which parts it overlaps. Sizes and positions are global, so an object inside an App::Part counts where the Part puts it. Without object_names it checks the top-level objects, so an App::Part is one part. It does no meshing, so it is fast. It checks solids and meshes.
 
-- printable is true only when something was checked, every part lies inside the plate and no two parts overlap.
+- printable is true only when something was checked, every part lies inside the plate and no two parts overlap. A floating part is a warning on its row, not an issue.
 - Space the parts apart before you call it. Overlapping complex parts, such as threads, make the intersection slow.
 - Leave a few mm between each part and the plate edge: the edge zone is often not printable. The reply gives the free margin to each edge.
 - Overlap of two solids is the volume of their shared solid. A solid resting in another solid's cavity does not overlap it.
 - A mesh is checked by its bounding box, so a part nested in a mesh's box counts as overlapping. Space mesh parts apart. Read mesh.md for working on meshes.
-- When it reports a part outside the plate or an overlap, move the part with update_object on Placement, then call it again.
+- When it reports a part outside the plate, floating or overlapping, move the part with update_object on Placement, then call it again.
 - Tell the user the size of each part and whether the layout fits.
 
 ## Fix

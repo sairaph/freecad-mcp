@@ -30,7 +30,8 @@ type printabilityFront struct {
 	Printable   bool   `yaml:"printable"`
 	ObjectCount int    `yaml:"object_count"`
 	// ObjectsWithIssues counts parts with at least one issue: outside the
-	// plate, overlapping another part, or without a solid.
+	// plate, overlapping another part, or without a solid. A floating part is a
+	// warning and does not count.
 	ObjectsWithIssues int `yaml:"objects_with_issues"`
 	OverlapCount      int `yaml:"overlap_count"`
 }
@@ -50,6 +51,13 @@ func partFacts(obj map[string]any) []string {
 	if size, ok := obj["size"].([]any); ok && len(size) == 3 {
 		facts = append(facts, fmt.Sprintf("size %s x %s x %s mm",
 			formatNumber(size[0]), formatNumber(size[1]), formatNumber(size[2])))
+	}
+	if box, ok := obj["bound_box"].([]any); ok && len(box) == 6 {
+		low, okLow := number(box[2])
+		high, okHigh := number(box[5])
+		if okLow && okHigh {
+			facts = append(facts, fmt.Sprintf("z %s to %s", formatNumber(math.Round(low*1e4)/1e4+0), formatNumber(math.Round(high*1e4)/1e4+0)))
+		}
 	}
 	if margin, ok := number(obj["free_margin_mm"]); ok {
 		fact := fmt.Sprintf("free margin to the plate edges %.4g mm%s", margin, sideMargins(obj["margin_mm"]))
@@ -172,6 +180,9 @@ func (s *Server) checkPrintability(ctx context.Context, _ *mcp.CallToolRequest, 
 		}
 		if facts := partFacts(obj); len(facts) > 0 {
 			fmt.Fprintf(&body, "\n  %s.", strings.Join(facts, "; "))
+		}
+		for _, warning := range stringItems(obj["warnings"]) {
+			fmt.Fprintf(&body, "\n  Warning: %s.", warning)
 		}
 	}
 	for _, item := range notChecked {

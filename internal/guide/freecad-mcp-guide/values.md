@@ -66,6 +66,19 @@ Applies to obj_properties in create_object and update_object.
 - To stand it with legs along x and z and the thickness along y, set Placement Base (0, t, 0) and Rotation Axis (1, 0, 0) Angle 90: it then fills x 0 to a, y 0 to t, z 0 to b.
 - A regular polygon prism: Part::Prism with Polygon (the number of sides), Circumradius (centre to corner) and Height. A hexagon with Circumradius 10 is 20 mm across the corners.
 
+## Fillet and Chamfer
+
+- Part::Fillet and Part::Chamfer take Base, Edges and a size: {"Base": "Box", "Edges": ["Edge1", "Edge2"], "Radius": 1}. A Chamfer takes "Size" in place of Radius.
+- Edges that differ in size: {"Base": "Box", "Edges": [{"edge": "Edge1", "radius": 2}, {"edge": "Edge2", "radius": 1}]}.
+- Get the Edge names from list_subelements. Without Edges the call is refused. The size is a number: an expression on it is refused.
+- Read printing.md for which edges to round on a printed part.
+
+## Draft profiles
+
+- Draft::Circle, Draft::Rectangle, Draft::Polygon and Draft::Wire are flat: a face (or edges), never a solid. The reply says so.
+- Make the solid with Part::Extrusion: {"Base": "Polygon", "DirMode": "Normal", "LengthFwd": 5}. Use the name the Draft reply returns. The Extrusion hides the profile.
+- A Draft::Wire makes a solid only with Closed true; an open one extrudes to a shell.
+
 ## Colors
 
 {"ViewObject": {"ShapeColor": [0.8, 0.2, 0.2, 1.0]}}

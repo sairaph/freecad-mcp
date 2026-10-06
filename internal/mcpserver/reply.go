@@ -765,7 +765,20 @@ func shapeText(shape map[string]any) string {
 			f, _ := number(v)
 			dims[i] = strconv.FormatFloat(math.Round(f*100)/100, 'f', -1, 64)
 		}
-		parts = append(parts, strings.Join(dims, " x ")+" mm")
+		text := strings.Join(dims, " x ") + " mm"
+		if container := str(shape, "container"); container != "" {
+			text += fmt.Sprintf(" (global, inside %s, which moves it", container)
+			if local, ok := shape["local_size"].([]any); ok && len(local) == 3 {
+				ld := make([]string, 3)
+				for i, v := range local {
+					f, _ := number(v)
+					ld[i] = strconv.FormatFloat(math.Round(f*100)/100, 'f', -1, 64)
+				}
+				text += "; local " + strings.Join(ld, " x ") + " mm"
+			}
+			text += ")"
+		}
+		parts = append(parts, text)
 	}
 	if volume, ok := number(shape["volume"]); ok {
 		parts = append(parts, fmt.Sprintf("volume %.1f mm^3", volume))

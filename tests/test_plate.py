@@ -32,3 +32,14 @@ def test_build_height_counts_only_when_given_and_no_negative_zero():
     assert problems == ["extends past z = 25 (the plate edge) by 5 mm"]
     assert margins["z_high"] == -5 and free == -5
     assert str(plate.plate_margins((0, 0, 0, 10, 10, 10), [100, 100], [0, 0])[0]["x_low"]) == "0.0"
+
+
+def test_a_part_above_the_plate_floats_and_one_on_it_does_not():
+    assert plate.floating_warning((0, 0, 5, 10, 10, 8)) == (
+        "floats 5 mm above the plate: it needs slicer supports, or move it down so its lowest point is at z 0"
+    )
+    assert plate.floating_warning((0, 0, 0.004, 10, 10, 8)) is None
+    assert plate.floating_warning((0, 0, 0, 10, 10, 8)) is None
+    # Below the plate is plate_margins' problem, not this one.
+    assert plate.floating_warning((0, 0, -2, 10, 10, 8)) is None
+    assert plate.floating_warning((0, 0, 0.5, 10, 10, 8)).startswith("floats 0.5 mm above")

@@ -200,6 +200,17 @@ Draft::Polygon    FacesNumber, Radius
 Draft::Wire       Points (list of {x, y, z}), optional Closed
 ```
 
+A Draft object is a flat profile (a face, or edges for an open wire), not a solid:
+the reply says so. `Part::Extrusion` with `Base` the Draft object, `DirMode`
+`Normal` and `LengthFwd` makes the solid and hides the profile (an open
+`Draft::Wire` extrudes to a shell: pass `Closed`).
+
+An `App::Part` holds objects through its `Group`, in `create_object` or
+`update_object`: `{"Group": ["Leaf", "Pin"]}`. It is the whole list (an object
+left out leaves the Part), and FreeCAD refuses an object that is already in
+another Part (`Object can only be in a single GeoFeatureGroup`). The guide's
+`assembly.md` has the workflow.
+
 `Part::Fillet` and `Part::Chamfer` take `Base` and `Edges` in `obj_properties`,
 both required (without edges FreeCAD cannot compute them, so the call is
 refused): `["Edge1", "Edge2"]` with `Radius` (a chamfer: `Size`), or
@@ -270,7 +281,7 @@ from visible to hidden during the call, whoever hid it: `Hidden: Block, Hole
 (inputs of Clip).` For an object with a `Shape` (not a sheet, a FEM object or a
 group) it also gives what the shape holds: `Shape: 1 solid, 40 x 20 x 12 mm,
 volume 9503.5 mm^3` (the tight box; a shape without a solid says `no solid`
-and counts its shells, faces or edges instead). When the shape is null or has
+and counts its shells, faces or edges instead; an object a moved `App::Part` or Body holds gets the global size and the local one beside it: `40 x 6 x 20 mm (global, inside PartA, which moves it; local 40 x 20 x 6 mm)`). When the shape is null or has
 no solid although an input has one (a `Part::Common` of parts that do not
 overlap, a `Part::Cut` whose tool removes the base) the reply adds a warning,
 `Warning: The result holds no solid: its inputs do not overlap. Check their
@@ -383,9 +394,9 @@ lists its edges, and the reply names a source object it hid, as for
 ### Shape changes
 
 `undo`, `redo`, `recompute_document`, `update_spreadsheet_cells`, `delete_object`,
-`create_object` and `update_object` list the shapes they changed: for each top-level object (one
-no other object's tree node claims, so a Body counts once and its features not
-at all) whose shape changed during the call, `Shapes now: <name>: <shape>` in
+`create_object` and `update_object` list the shapes they changed: for each topmost object that has a
+shape (no other object's tree node claims it, so a Body counts once and its features not at all; an
+`App::Part` has no shape, so what it holds counts, placed as the Part puts it) whose shape changed during the call, `Shapes now: <name>: <shape>` in
 the `Shape:` format of `create_object` (several objects are listed one per
 line; the JSON has `changed_shapes`, `changed_shapes_count` and
 `changed_shapes_truncated`, capped at 200 like the invalid rows). A call that
@@ -419,7 +430,10 @@ there before the call is not listed. Undo brings them back.
 
 ### `list_objects`
 
-List every object in a document with its type and properties.
+List every object in a document with its type and properties. Each Shape entry has the counts and
+the box but not `Volume`, `Area` or `CenterOfMass` (OpenCascade integrals, about 50 ms for each
+threaded solid, 15 s for 100): the reply says once at its end `Volume, area and centre of mass are left
+out of this list: get_object gives them for one object.` Compact lists have no Shape entry.
 
 - `doc_name` (string, required)
 - `compact` (boolean, default `false`): a table with one short row per object
@@ -427,7 +441,9 @@ List every object in a document with its type and properties.
   property as JSON. `Parent` lists every parent, comma separated, in FreeCAD's
   order (a tool shared by two booleans has two); `Solids` is the number of
   solids of the shape, so an empty result reads 0, blank for an object with no
-  shape.
+  shape. The axes, planes and point of every `App::Origin` (an App::Part's or a Body's) are
+  left out and one line says so: `Origin axes and planes are left out: 7 per Origin;
+  list_objects with compact false lists them.` The Origin rows stay.
 - `include_screenshot` (boolean, default `false`), `view_name`: see
   [screenshot options](#screenshot-options). The screenshot is off unless
   `include_screenshot` is passed as `true`.
@@ -450,7 +466,10 @@ Use it to check the values `update_object` or `create_object` set, or to see
 which properties an object has before updating it. Its `Shape` block gives
 the volume, area, vertex, edge, face and solid counts (`SolidCount`, so a fused
 result shown as one Compound of two solids is clear), the bounding box and the
-centre of mass; quantities are in FreeCAD's preferred units. `OutList` and
+centre of mass, all global: the `Placement` of every `App::Part` or Body above the object is applied
+(an object inside a moved Part would otherwise be reported where it sits in its Part). When a
+container moves the object, `LocalBoundBox` gives the box without it and `BoundBoxNote` names the
+container. Quantities are in FreeCAD's preferred units. `OutList` and
 `InList` name each linked object once, in FreeCAD's order, even when it is
 linked twice (a fillet's `Base` and `Edges`). A missing object
 is a not-found error naming `list_objects` and `list_documents` as next steps.
@@ -513,7 +532,8 @@ or `update_object`. An empty result means nothing is selected.
 
 ### `list_subelements`
 
-List the faces and edges of an object with their names and geometry. It reads
+List the faces and edges of an object with their names and geometry, in global coordinates (the
+Placement of every `App::Part` or Body above the object is applied). It reads
 the document and changes nothing.
 
 - `doc_name` (string, required)
@@ -773,6 +793,11 @@ without any dialog.
 - `timeout` (number, optional, default 300, up to 1800 seconds): raise it for
   fine meshes of large models.
 
+Every format writes an object where `get_object` says it is (global): a member of a moved `App::Part`
+or Body lands at the Part's place, and an object written alone keeps its own `Placement`. STEP, IGES, glTF,
+DXF and SVG take the shape as it is, so such an object is written from a copy placed globally in a
+hidden temporary document (same name and label, the shape in a compound); the document is not touched.
+
 The format follows the extension of `path`: `.stl` (binary, or ASCII with
 `ascii` true), `.ast`, `.3mf`, `.amf`, `.obj`, `.ply` and `.off` are triangle
 meshes for slicers, tessellated with `quality` or explicit
@@ -815,7 +840,8 @@ once.
 
 - `doc_name` (string, required)
 - `object_names` (array of strings, optional): default the visible top-level
-  solids and meshes.
+  solids and meshes, so an `App::Part` is one part. Positions are global: an object inside a moved
+  container is checked where it sits.
 - `bed_x`, `bed_y` (numbers, required, up to 10000 mm): plate width and depth.
 - `bed_z` (number, optional, up to 10000 mm): build height. Without it the
   reply ends with `Height not checked: pass bed_z with the printer's build
@@ -827,7 +853,7 @@ once.
 - `timeout` (number, optional, default 120, up to 1800 seconds).
 
 For each part, the reply gives its object name (and its label when that
-differs), its size (tight bounding box), its free margin to the plate edges
+differs), its size (tight bounding box), its z range (`z 0 to 3`), its free margin to the plate edges
 (the distance from the nearest side of its box to a plate edge in x and y, and
 to the build height when `bed_z` is given; the side that sits on the plate is
 not counted; a sign shows only when the part is outside) followed by the
@@ -842,7 +868,10 @@ as overlapping, and the reply says so for that part (`overlap_checked_by` is
 `bounding box`). The size is the tight box: for a swept solid such as a thread
 it is exact, where `Shape.BoundBox` can be much wider. `printable` is true only when at least one part was
 checked, every part is inside the plate and none overlaps; it is false, not
-vacuously true, when nothing was checked. Move parts with `update_object` on
+vacuously true, when nothing was checked. A part whose lowest point is more than 0.01 mm above z 0
+gets a warning on its row (`Warning: floats 5 mm above the plate: it needs slicer supports, or move it
+down so its lowest point is at z 0`); `printable` stays true, since a slicer can support it. Move
+parts with `update_object` on
 `Placement` until it is true. Invalid shapes usually come from a failed
 feature; `recompute_document` shows which one, and `analyze_mesh` checks mesh
 defects.
@@ -1270,7 +1299,10 @@ gets no unsaved-changes mark.
 
 An orbit or tour runs on FreeCAD's GUI thread until the user moves the view,
 the next `set_view`, `reset` or the document closing. `get_view` pauses it for
-the capture and resumes it. The reply states the camera and any running mode.
+the capture and resumes it. The reply states the camera and any running mode: the direction it
+looks along to two decimals, the standard view when it is one, and the side the camera is on (`looking
+along (-0.58, 0.58, -0.58): Isometric, from above, from +x and -y`; Front is `(0, 1, 0)`, from -y; Top
+is `(0, 0, -1)`, from above).
 A call that stops a running orbit or tour says so (`Stopped the running
 orbit.`, `(reset)` after it with `reset`), also when it starts a new mode; a mode
 that stopped on its own since the last call is reported once (`The orbit had

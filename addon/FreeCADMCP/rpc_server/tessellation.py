@@ -182,6 +182,47 @@ def shape_of(obj: Any) -> Any:
     return apply_container_placement(shape, obj)
 
 
+def global_shape(obj: Any) -> Any:
+    """``obj.Shape`` in global coordinates, or None when it has no Shape.
+
+    ``obj.Shape`` carries only the object's own Placement, so an object inside
+    a moved App::Part (or Body) sits elsewhere than its Shape says. A copy with
+    the container's placement applied is made only then; the document's own
+    shape is returned as it is otherwise.
+    """
+    shape = getattr(obj, "Shape", None)
+    if shape is None:
+        return None
+    try:
+        if shape.isNull():
+            return shape
+        container = container_placement(obj)
+        if container is None or container.isIdentity():
+            return shape
+        return apply_container_placement(shape, obj)
+    except Exception:
+        return shape
+
+
+def moving_container(obj: Any) -> str | None:
+    """The Name of the container that moves ``obj`` away from where its own
+    Shape says: the nearest one above it with a Placement of its own, else the
+    nearest one; None when no container moves it."""
+    container = container_placement(obj)
+    if container is None or container.isIdentity():
+        return None
+    nearest = parent_geo_feature_group(obj)
+    group = nearest
+    while group is not None:
+        try:
+            if not group.Placement.isIdentity():
+                return str(group.Name)
+        except Exception:
+            pass
+        group = parent_geo_feature_group(group)
+    return str(nearest.Name) if nearest is not None else None
+
+
 def mesh_shape(shape: Any, settings: Settings) -> Any:
     """Tessellate ``shape`` (already a copy) into a Mesh.Mesh."""
     import MeshPart

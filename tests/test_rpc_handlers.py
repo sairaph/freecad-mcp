@@ -81,7 +81,7 @@ def rpc_module(monkeypatch: pytest.MonkeyPatch) -> Iterator[types.ModuleType]:
                 get_parts_list=lambda: [], insert_part_from_library=lambda _path: None
             ),
             "serialize": types.SimpleNamespace(
-                serialize_object=lambda obj: {"Name": obj.Name},
+                serialize_object=lambda obj, **_: {"Name": obj.Name},
                 list_objects_gui=lambda _doc_name: [],
             ),
             "settings": types.SimpleNamespace(

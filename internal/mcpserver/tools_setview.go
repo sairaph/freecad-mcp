@@ -145,7 +145,7 @@ func (s *Server) setView(ctx context.Context, _ *mcp.CallToolRequest, in setView
 	var body strings.Builder
 	fmt.Fprintf(&body, "The 3D view of '%s' is set.", front.Document)
 	if cam, ok := res["camera"].(map[string]any); ok {
-		fmt.Fprintf(&body, " %s camera looking along %s.", str(cam, "type"), formatVector(cam["view_direction"]))
+		fmt.Fprintf(&body, " %s camera looking along %s.", str(cam, "type"), cameraText(cam["view_direction"]))
 	}
 	switch mode {
 	case "orbit":
