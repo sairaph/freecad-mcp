@@ -104,6 +104,7 @@ func (s *Server) undoOrRedo(ctx context.Context, in undoInput, which string) (*m
 	}
 	fmt.Fprintf(&body, "\n%s; %s.", remainingClause("undo", undoNames), remainingClause("redo", redoNames))
 	body.WriteString(invalidObjectsBody(res, in.DocName))
+	body.WriteString(shapesNote(res))
 
 	out := render.SuccessResult(front, body.String())
 	return s.withNotice(s.screenshot(ctx, conn, out, in.IncludeScreenshot, viewString(in.ViewName), in.DocName)), nil, nil

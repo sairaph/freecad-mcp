@@ -13,6 +13,7 @@ Head sizes from the standards:
 | M5 | 8.5 / 5.0 | 11.20 / 3.10 |
 | M6 | 10.0 / 6.0 | 13.44 / 3.72 |
 
+- A bore that locates a part (a motor boss, a bearing, a pin that must not wobble) takes the sliding or locating fit of the material file, not the screw hole allowance. Read the Fits section of the material file.
 - Counterbore for a socket head: M3 6.5 wide 3.6 deep, M4 8.3 / 4.7, M5 9.8 / 5.7, M6 11.3 / 6.8. The clearance hole below follows the material file.
 - Countersink: a 90 degree cone, top diameter M3 7.2, M4 9.5, M5 11.7, M6 14.0, down to the clearance hole. The head then sits flush or just below.
 - M2, M2.5 and other countersunk heads: no confirmed values. Ask the user for the screw, or print a coupon.

@@ -13,6 +13,7 @@ import (
 type measureRef struct {
 	Object string  `json:"object"`
 	Sub    *string `json:"sub,omitempty"`
+	Point  *string `json:"point,omitempty"`
 }
 
 type measureInput struct {
@@ -91,6 +92,9 @@ func (s *Server) measure(ctx context.Context, _ *mcp.CallToolRequest, in measure
 		if r.Sub != nil {
 			ref["sub"] = *r.Sub
 		}
+		if r.Point != nil {
+			ref["point"] = *r.Point
+		}
 		refs[i] = ref
 	}
 	res, err := conn.Measure(ctx, in.DocName, in.Kind, refs)
@@ -109,6 +113,9 @@ func (s *Server) measure(ctx context.Context, _ *mcp.CallToolRequest, in measure
 
 	var body strings.Builder
 	fmt.Fprintf(&body, "%s of %s: %s.", in.Kind, refsDescription(in.Refs), formatMeasure(res["value"], unit))
+	if used := stringItems(res["points_used"]); len(used) > 0 {
+		fmt.Fprintf(&body, "\n\nMeasured between the %s.", strings.Join(used, " and the "))
+	}
 	if points, ok := res["points"].([]any); ok && len(points) == 2 {
 		fmt.Fprintf(&body, "\n\nClosest points: %v to %v.", points[0], points[1])
 	}

@@ -181,7 +181,7 @@ func (s *Server) deleteObject(ctx context.Context, _ *mcp.CallToolRequest, in ob
 	txName, txMerged := transactionFields(res)
 	out := render.SuccessResult(objectFront{Document: in.DocName, Object: name, Transaction: txName,
 		InvalidCount: intField(res, "invalid_count"), StaleCount: intField(res, "stale_count")},
-		collateralNote(transactionNote(fmt.Sprintf("Object '%s' deleted successfully.", name), txName, txMerged), res, in.DocName))
+		collateralNote(transactionNote(fmt.Sprintf("Object '%s' deleted successfully.", name), txName, txMerged), res, in.DocName)+shapesNote(res))
 	return s.withNotice(s.screenshot(ctx, conn, out, in.IncludeScreenshot, viewString(in.ViewName), in.DocName)), nil, nil
 }
 

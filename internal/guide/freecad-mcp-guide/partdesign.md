@@ -33,6 +33,7 @@ Build one solid from sketches: a Body holds the sketches and features in order, 
   - {"circle": {"center": [x, y], "radius": r}}
   - {"arc": {"center": [x, y], "radius": r, "start_angle": 0, "end_angle": 90}} runs counter-clockwise, in degrees.
   - {"rectangle": {"corner": [x, y], "size": [w, h]}} adds four lines with their corners joined.
+  - {"slot": {"center1": [x, y], "center2": [x, y], "width": w}} adds two lines and two arcs, joined: a closed slot whose caps are centred on the two points. The centres must differ and width must be above 0.
 - update_object with Geometry replaces all the geometry of the sketch, and its constraints with it. Constraints cannot be set with this tool.
 - The reply says how many geometry elements the sketch has and whether the profile is closed. A Pad or Pocket needs a closed profile. Lines of a profile must meet at their ends.
 - A face of the Pad changes its number when the part changes. Call list_subelements again before attaching a new sketch.
@@ -40,9 +41,18 @@ Build one solid from sketches: a Body holds the sketches and features in order, 
 ## Features
 
 - Pad: Profile, Length. A Pocket cuts: Profile, Length, or Type "ThroughAll" to cut through the whole part.
+- A Pocket cuts against the sketch's normal, so a sketch on the top face of the part cuts down into it. A sketch on XY_Plane at the part's bottom (normal up, part above) cuts nothing: set Reversed true and it cuts up into the part. Measured: Length 3 from the top face removes 300 mm^3 of a 10 x 10 profile, the same sketch from XY_Plane under the part removes 0 and with Reversed true 300.
 - Fillet and Chamfer: Base, Edges ["Edge1"], Radius (Size for a chamfer). They take one value for all their edges: make a second feature for another size. update_object with Edges sets the edges again.
 - Round edges last. Face and edge numbers change when an earlier feature changes.
 - Never round the cut edge of a hole that a screw or part locates in. Read features.md.
+
+## Driving a part from a sheet
+
+- Sketch Geometry is fixed numbers: the tools set no dimensional constraints, so a cell cannot move a sketch line or change a circle.
+- To drive a part from a Spreadsheet::Sheet, build it from the primitives, which take expressions: PartDesign::AdditiveBox, AdditiveCylinder, AdditiveSphere, AdditiveCone, AdditiveEllipsoid, AdditiveTorus, AdditivePrism, AdditiveWedge and the Subtractive ones with the same names. create_object with body_name (or the only Body) puts them in the Body and each cuts or adds at once.
+- Bind their size and place: {"Length": "=Params.platelength", "Width": "=Params.platewidth", "Height": "=Params.thick"} for a box, {"Radius": "=Params.holeradius", "Height": "=Params.thick"} for a cylinder, and {"Placement.Base.x": "=Params.holex", "Placement.Base.y": "=Params.holey"} to place it. Read parametric.md.
+- Bind a sketch the same way through its AttachmentOffset: {"AttachmentOffset.Base.x": "=Params.dx"} moves the whole sketch, so a profile slides with a cell.
+- A plate with two holes: an AdditiveBox for the plate and a SubtractiveCylinder for each hole, with the hole positions in cells. Changing a cell and update_spreadsheet_cells then moves the holes and resizes the plate; the reply gives the Body's new shape.
 
 ## Errors
 

@@ -160,6 +160,7 @@ func (s *Server) updateSpreadsheetCells(ctx context.Context, _ *mcp.CallToolRequ
 		}
 	}
 
+	body.WriteString(shapesNote(res))
 	return s.withNotice(render.SuccessResult(front, transactionNote(body.String(), transactionName, merged))), nil, nil
 }
 

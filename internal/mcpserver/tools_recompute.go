@@ -119,6 +119,7 @@ func (s *Server) recomputeDocument(ctx context.Context, _ *mcp.CallToolRequest, 
 	if note := staleNote(res); note != "" {
 		body.WriteString("\n\n" + note)
 	}
+	body.WriteString(shapesNote(res))
 	if touchedCount > 0 {
 		// Only objects not listed as invalid are counted here: a failed object
 		// is Touched too, and is already listed above. What is left was

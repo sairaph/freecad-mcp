@@ -20,7 +20,7 @@ from xmlrpc.server import resolve_dotted_attribute
 from PySide import QtCore
 
 from rpc_server import request_context, session_lock
-from rpc_server.agent_log import agent_error, quiet_notifications
+from rpc_server.agent_log import agent_error, agent_warning, quiet_notifications
 from rpc_server.commands import register_commands
 from rpc_server.errors import CONFLICT, FREECAD_ERROR, INVALID_INPUT, NOT_FOUND, fail, tool_call
 from rpc_server.fem_executor import run_fem_analysis as _run_fem_analysis
@@ -1111,6 +1111,8 @@ class FreeCADRPC:
 
     def _delete_object_gui(self, doc_name: str, obj_name: str):
         from rpc_server.object_factory import collateral_report, failed_before
+        from rpc_server import partdesign
+        from rpc_server.shape_changes import changed_shapes, snapshot
         from rpc_server.transactions import active_document, transaction
 
         try:
@@ -1126,6 +1128,11 @@ class FreeCADRPC:
             # focused (App/Document.cpp:379-386).
             with active_document(doc), transaction("delete_object") as tx:
                 before = failed_before(doc)
+                shapes_before = snapshot(doc)
+                try:
+                    partdesign.leave_body(doc, obj_name)
+                except Exception as e:
+                    agent_warning(f"MCP RPC: could not take '{obj_name}' out of its Body: {type(e).__name__}: {e}\n")
                 doc.removeObject(obj_name)
                 doc.recompute()
                 # What the objects built on the deleted one did: FreeCAD fails
@@ -1133,7 +1140,7 @@ class FreeCADRPC:
                 # they had.
                 collateral = collateral_report(doc, before, None)
             FreeCAD.Console.PrintMessage(f"Object '{obj_name}' deleted via RPC.\n")
-            return {"success": True, **tx.reply_fields(), **collateral}
+            return {"success": True, **tx.reply_fields(), **collateral, **changed_shapes(doc, shapes_before)}
         except Exception as e:
             return str(e)
 

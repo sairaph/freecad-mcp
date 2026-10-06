@@ -116,7 +116,7 @@ func timeoutText(seconds int) string {
 
 const (
 	readPathText = "absolute path of the file on the computer running FreeCAD"
-	objPropsText = `properties. Lengths (mm) and angles (degrees) may be numbers; other quantities are strings with a unit ("100 N"). "=Params.h" binds an expression; "=" alone removes it. Links take names: "Box" or ["Box", "Cylinder"]. References: a list of {"object_name": "Box", "face": "Face1"}, ["Box", "Face1"] or ["Box", ["Face1", "Face2"]]. Fillet/Chamfer: Base, Edges ["Edge1"], Radius (Size). Sketch: AttachmentSupport takes the References forms ("XY_Plane" is the Body's); Geometry [{"rectangle": {"corner": [0, 0], "size": [w, h]}}, {"circle": {"center": [x, y], "radius": r}}, {"line": [[x1, y1], [x2, y2]]}, {"arc": {"center": [x, y], "radius": r, "start_angle": 0, "end_angle": 90}}]. Placement: {"Base": {"x": 0, "y": 0, "z": 0}, "Rotation": {"Axis": {"x": 0, "y": 0, "z": 1}, "Angle": 45}}.`
+	objPropsText = `properties. Lengths (mm) and angles (degrees) may be numbers; other quantities are strings with a unit ("100 N"). "=Params.h" binds an expression; "=" alone removes it. Links take a name or a list of names. References: a list of {"object_name": "Box", "face": "Face1"} or ["Box", "Face1"]. Fillet/Chamfer: Base, Edges, Radius (Size). Sketch: AttachmentSupport takes the References forms ("XY_Plane" is the Body's); Geometry [{"rectangle": {"corner": [0, 0], "size": [w, h]}}, {"circle": {"center": [x, y], "radius": r}}, {"line": [[x1, y1], [x2, y2]]}, {"arc": {"center": [x, y], "radius": r, "start_angle": a, "end_angle": b}}, {"slot": {"center1": [x, y], "center2": [x, y], "width": w}}]. Placement: {"Base": {"x": 0, "y": 0, "z": 0}, "Rotation": {"Axis": {"x": 0, "y": 0, "z": 1}, "Angle": 45}}.`
 )
 
 // pathText is the description of the path parameter of execute_code and
@@ -258,12 +258,13 @@ FEM: create Fem::AnalysisPython first; pass analysis_name for its material, cons
 		Params:      map[string]string{"doc_name": "document whose selection to read (default: all open documents)"},
 	},
 	"measure": {
-		Description: `Measure in global coordinates: distance between two objects or sub-elements (with the closest points), angle between two straight edges or planar faces, length of edges, radius of a circular edge or cylindrical or spherical face, area or volume. Get sub-element names from list_subelements or get_selection. The reply gives the value with its unit.`,
+		Description: `Measure in global coordinates: distance between two objects or sub-elements (with the closest points), angle between two straight edges or planar faces, length of edges, radius of a circular edge or cylindrical or spherical face, area or volume. Get sub-element names from list_subelements or get_selection. The reply gives the value with its unit and, for a centre distance, the points used.`,
 		Params: map[string]string{
 			"kind":          "distance and angle take two refs; radius takes one; length, area and volume take one or more",
 			"refs":          "objects or sub-elements to measure",
 			"refs[].object": "object name, as list_objects shows it",
 			"refs[].sub":    "sub-element such as Face3, Edge1, Vertex2 from list_subelements, or the full path get_selection returns (Body.Pad.Face3) passed unchanged (default: the whole object)",
+			"refs[].point":  "center: measure from the centre of a circle or arc edge or a sphere face, or the axis of a cylinder face, for distance only (a hole spacing, not rim to rim)",
 		},
 	},
 	"get_view": {

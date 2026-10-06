@@ -14,6 +14,7 @@ from rpc_server.errors import CONFLICT, INVALID_INPUT, fail, tool_call
 from rpc_server.gui_task import run_on_gui
 from rpc_server.lookup import require_document
 from rpc_server.object_validation import invalid_objects_report
+from rpc_server.shape_changes import changed_shapes, snapshot
 
 
 MAX_STEPS = 100
@@ -94,6 +95,7 @@ def _run(doc_name: str, steps: Any, tool: str) -> dict[str, Any]:
         action = doc.undo if tool == "undo" else doc.redo
 
         done: list[str] = []
+        shapes_before = snapshot(doc)
         for _ in range(steps):
             if getattr(doc, count_attr) <= 0:
                 break
@@ -115,6 +117,7 @@ def _run(doc_name: str, steps: Any, tool: str) -> dict[str, Any]:
             # A Touched object left over from before this call is not a
             # failure unless this call actually ran a recompute over it.
             **invalid_objects_report(doc.Objects, exclude_touched=not did_recompute),
+            **changed_shapes(doc, shapes_before),
         }
 
     # undo and redo take no timeout (fixed at _TIMEOUT), so run_on_gui's `tool`

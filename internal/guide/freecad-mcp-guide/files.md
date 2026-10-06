@@ -29,6 +29,7 @@
 - export_document without object_names writes the visible top-level objects with geometry. A Body is written once.
 - Formats: 3MF and AMF keep one object per part, in mm. glTF is in meters, and .gltf writes a .bin beside it. DXF and SVG are projected on XY.
 - Check the reply for skipped objects and warnings.
+- Check a round trip (export, then import_file) by comparing volumes: measure volume on the original and on the imported object, or read the Shape line of each. They should agree to 1e-6 or better. An import arrives as a Part::Feature named after the file's solid, not as the original features.
 
 ## Scripts that write files
 
