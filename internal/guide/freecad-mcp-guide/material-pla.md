@@ -5,7 +5,7 @@ Design rules for FDM parts in PLA with a 0.4 mm nozzle. Sizes in mm. "Per side" 
 ## Accuracy
 
 - PLA shrinks least of the common filaments: holes print 0.1 to 0.2 undersize on diameter; outer faces print 0.05 to 0.1 oversize.
-- A hole for a bought part (screw, rod, bearing, insert): model a vertical hole (axis along z) at nominal + 0.2 on diameter. A horizontal hole sags at the top: above 3 diameter model a teardrop with its 45 degree point up, its round part at the vertical hole allowance (nominal + 0.2); below 3, nominal + 0.3.
+- A hole for a bought part (screw, rod, bearing; not a heat-set insert, see Threads): model a vertical hole (axis along z) at nominal + 0.2 on diameter. A horizontal hole sags at the top: above 3 diameter model a teardrop with its 45 degree point up, its round part at the vertical hole allowance (nominal + 0.2); below 3, nominal + 0.3.
 - Two printed parts that fit together: model the gaps under Fits. They already cover the print error of both parts; do not add the hole allowance as well.
 - The first layer flares 0.2 to 0.5 outward: chamfer every bottom outer edge 0.5 x 45 degrees.
 
@@ -25,7 +25,8 @@ Design rules for FDM parts in PLA with a 0.4 mm nozzle. Sizes in mm. "Per side" 
 - Pitch at least 2 x depth + 1.0, which leaves the two flats. M10 x 3 with depth 1.0 works; M10 x 2 with depth 1.0 leaves no flats and jams.
 - Smallest reliable thread M8 x 3 with depth 1.0. Below that use heat-set inserts or captive nuts.
 - Print both parts with the thread axis vertical. Chamfer both entries 1.0 x 45 degrees.
-- PLA threads crack at the root under torque: use heat-set inserts for anything tightened with a tool or opened often. Insert hole 4.0 to 4.4 for M3, 1.0 deeper than the insert, wall around it at least 1.6. Ask the user for the insert's length. A part thinner than the insert length plus 1.0 needs a boss under the insert or a shorter insert.
+- PLA threads crack at the root under torque: use heat-set inserts for anything tightened with a tool or opened often.
+- Heat-set inserts: ask the user for the brand and length and use its drawing when given. Otherwise, for the common standard series (hole / length / minimum wall): M2 3.2 / 3.0 / 1.3, M2.5 4.0 / 4.0 / 1.6, M3 4.0 / 5.7 / 1.6, M4 5.6 / 8.1 / 2.1, M5 6.4 / 9.5 / 2.6, M6 8.0 / 12.7 / 3.3, M8 9.7 / 12.7 / 4.5. Straight hole, depth the insert length + 1.0, a 0.5 chamfer at the entry. Do not add the hole allowance: these sizes are for the printed hole. Test-fit one insert; if it will not go in, open the hole by 0.2. A part thinner than the insert length plus 1.0 needs a boss under the insert or a shorter insert.
 - Captive nut: pocket at the nut's flats + 0.2 per side, loaded from the side.
 
 ## Strength

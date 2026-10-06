@@ -23,6 +23,7 @@ Applies to obj_properties in create_object and update_object.
 - A string starting with "=" binds an expression: {"Height": "=Params.thickness * 2"}.
 - Params is the object name of a spreadsheet, thickness an alias in it. See parametric.md.
 - Other objects work too: {"Length": "=Box.Width + 5 mm"}.
+- Expressions take arithmetic and negatives: {"Placement.Base.x": "=-Params.width / 2"}, {"Length": "=(Params.a + Params.b) * 2"}.
 - "=" alone removes the binding and keeps the current value: {"Height": "="}.
 - An expression that cannot be parsed is an error that names the property, and create_object creates nothing. An expression that parses but points at something missing leaves the object created but not computing: the reply names it. Fix it with update_object or delete_object.
 

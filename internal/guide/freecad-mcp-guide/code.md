@@ -46,7 +46,7 @@ Use a tool when one exists. Use code only for what no tool covers.
 Build a thread as a swept profile along a helix, in execute_code_headless, then fuse it to the core and trim the ends:
 
 ```python
-import FreeCAD, Part
+import math, FreeCAD, Part
 pitch, depth, major, length = 2.0, 1.0, 12.0, 10.0
 r = major / 2
 root = r - depth
@@ -61,10 +61,17 @@ profile = Part.makePolygon([
 thread = Part.Wire(helix).makePipeShell([profile], True, True)
 core = Part.makeCylinder(root, length + pitch, FreeCAD.Vector(0, 0, -pitch / 2))
 bolt = core.fuse(thread).common(Part.makeCylinder(r + 1, length)).removeSplitter()
-print(bolt.isValid(), len(bolt.Solids), bolt.Volume)
+# The volume a correct bolt has: the core plus the thread's section outside it, once round every turn.
+w = 0.9 * pitch - 0.7 * pitch * inset / (depth + inset)  # profile width where it leaves the core
+area = depth * (w + 0.2 * pitch) / 2
+radius = root + depth * (w + 0.4 * pitch) / (3 * (w + 0.2 * pitch))  # radius of the section's centre
+expected = math.pi * root ** 2 * length + area * 2 * math.pi * radius * length / pitch
+print(bolt.isValid(), len(bolt.Solids), bolt.Volume, round(bolt.Volume / expected, 3))
 ```
 
-- A profile that only touches the core (its inner edge on the core surface) gives an invalid fuse. Let it reach inside the core.
+- Check the last number: 0.95 to 1.05 is a good bolt. Lower means part of the thread or the core was lost, although isValid is True and the shape has a solid. Measured: a profile that only touches the core (inset 0) gave 0.0 to 0.8 of the volume at several sizes, and a helix with extra turns gave 0.0 or 0.4, all reported valid.
+- Keep the helix exactly length long, starting at z 0, and keep inset at 0.3 or more. To put the thread elsewhere, move the finished bolt with bolt.translate(FreeCAD.Vector(0, 0, z)); moving the helix or adding turns can lose the thread silently.
+- A valid shape can still have lost a part. Compare the volume with the expected one after the thread and after any boolean on the bolt (a Cut into a nut body, a MultiFuse with other parts). create_object and recompute_document warn when a Fuse, Common or Cut has a volume its inputs rule out.
 - Save the result with Shape.exportBrep(path) or into a document, then load it in the GUI with execute_code or reload_document.
 - Leave clearance of 0.2 to 0.4 mm between a printed thread and its nut.
 
