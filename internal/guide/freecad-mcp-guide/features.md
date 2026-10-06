@@ -17,6 +17,17 @@ Head sizes from the standards:
 - Countersink: a 90 degree cone, top diameter M3 7.2, M4 9.5, M5 11.7, M6 14.0, down to the clearance hole. The head then sits flush or just below.
 - M2, M2.5 and other countersunk heads: no confirmed values. Ask the user for the screw, or print a coupon.
 - Print a recess opening up when you can. A counterbore that opens down must bridge: model one 0.2 layer across the hole at the top of the recess, which the user pierces after printing, or tell the user to flip the part.
+- Keep the material file's minimum wall under a recess. When the part is thinner than the recess depth plus that wall, thicken the part around the screw, or use a shallower recess and tell the user the head stands proud by the difference. Never leave less than the minimum wall.
+- A recess or hole that opens sideways (its axis is horizontal in the print pose) is a horizontal hole: give the recess the same pointed top. Read Teardrop below.
+
+## Teardrop
+
+A horizontal hole needs a pointed top: a round top sags. Build the tool, then cut it from the part with Part::Cut. r is the hole radius with its allowance, L the hole length, (x0, y0, z0) the centre of the hole's first end.
+
+- Hole along +x: a Part::Cylinder with Radius r, Height L, Placement Base (x0, y0, z0) and Rotation Axis (0, 1, 0) Angle 90. A Part::Box with Length L, Width r, Height r, Placement Base (x0, y0, z0) and Rotation Axis (1, 0, 0) Angle 45.
+- Hole along +y: the Cylinder with Rotation Axis (1, 0, 0) Angle -90. The Box with Length r, Width L, Height r, Rotation Axis (0, 1, 0) Angle -45.
+- Fuse the two with Part::Fuse and cut the fused tool.
+- The box corner sits on the axis and its opposite corner points up. The tool is one solid, r below the axis and r * sqrt(2) above it, with its sides tangent to the circle. get_object on the fuse shows that size.
 
 ## Cable channels
 

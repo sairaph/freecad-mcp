@@ -345,8 +345,20 @@ def mesh_boxes(obj: Any, seen: set[str] | None = None) -> list:
 
 
 def parent_map(doc: Any) -> dict[str, str]:
-    """Return child object Name -> parent object Name, as FreeCAD's tree view
-    nests them.
+    """Return child object Name -> its first parent's Name, as FreeCAD's tree
+    view nests it (``parent_lists`` has every parent).
+
+    The single source of both ``tree_root_objects`` (a top-level object is
+    one absent from this map) and a compact object list's "parent" field, so
+    the two never disagree about what counts as top level.
+    """
+    return {name: names[0] for name, names in parent_lists(doc).items()}
+
+
+def parent_lists(doc: Any) -> dict[str, list[str]]:
+    """Return child object Name -> the Names of every object whose tree node
+    claims it (a tool shared by two booleans has two), in FreeCAD's object
+    order, the group or body first.
 
     Two ways a parent's tree node claims a child, checked in this order so a
     PartDesign feature's parent is its Body rather than a container the Body
@@ -361,17 +373,13 @@ def parent_map(doc: Any) -> dict[str, str]:
       name would then claim same-named objects of ``doc`` (a repeated "Body"
       or "Box"), so a claimed child is only counted when it belongs to
       ``doc`` itself.
-
-    The single source of both ``tree_root_objects`` (a top-level object is
-    one absent from this map) and a compact object list's "parent" field, so
-    the two never disagree about what counts as top level.
     """
-    parents: dict[str, str] = {}
+    parents: dict[str, list[str]] = {}
     for obj in doc.Objects:
         parent_group = parent_geo_feature_group(obj)
         if parent_group is not None:
             try:
-                parents[obj.Name] = parent_group.Name
+                parents.setdefault(obj.Name, []).append(parent_group.Name)
             except Exception:
                 pass
 
@@ -392,7 +400,9 @@ def parent_map(doc: Any) -> dict[str, str]:
                 continue
             name = getattr(child, "Name", None)
             if name:
-                parents.setdefault(name, str(getattr(obj, "Name", "")))
+                parent = str(getattr(obj, "Name", ""))
+                if parent not in parents.setdefault(name, []):
+                    parents[name].append(parent)
 
     return parents
 

@@ -228,8 +228,8 @@ func compactObjectTable(objects any) (string, bool) {
 	}
 	cell := func(s string) string { return strings.ReplaceAll(strings.ReplaceAll(s, "|", `\|`), "\n", " ") }
 	var b strings.Builder
-	b.WriteString("| Name | Label | Type | State | Valid | Parent | Visible |\n")
-	b.WriteString("| --- | --- | --- | --- | --- | --- | --- |\n")
+	b.WriteString("| Name | Label | Type | State | Valid | Parent | Solids | Visible |\n")
+	b.WriteString("| --- | --- | --- | --- | --- | --- | --- | --- |\n")
 	for _, item := range list {
 		row, ok := item.(map[string]any)
 		if !ok {
@@ -239,9 +239,17 @@ func compactObjectTable(objects any) (string, bool) {
 		if v, ok := row["visible"].(bool); ok {
 			visible = strconv.FormatBool(v)
 		}
-		fmt.Fprintf(&b, "| %s | %s | %s | %s | %t | %s | %s |\n", cell(str(row, "name")), cell(str(row, "label")),
+		parent := strings.Join(stringItems(row["parents"]), ", ")
+		if parent == "" {
+			parent = str(row, "parent")
+		}
+		solids := ""
+		if n, ok := number(row["solids"]); ok {
+			solids = strconv.Itoa(int(n))
+		}
+		fmt.Fprintf(&b, "| %s | %s | %s | %s | %t | %s | %s | %s |\n", cell(str(row, "name")), cell(str(row, "label")),
 			cell(str(row, "type")), cell(strings.Join(stringItems(row["state"]), ", ")), boolField(row, "valid"),
-			cell(str(row, "parent")), visible)
+			cell(parent), solids, visible)
 	}
 	return b.String(), true
 }

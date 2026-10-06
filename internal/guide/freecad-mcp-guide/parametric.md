@@ -27,6 +27,10 @@ Bind one part of a Placement the same way: {"Placement.Base.z": "=Params.thickne
 
 - Make the height of a through-cut tool exceed the driven thickness, for example "=Params.thickness + 2 mm", so the hole stays through when the thickness changes.
 
+## After a change
+
+- A Part::Fillet or Part::Chamfer lists edge numbers, and they can change when a dimension changes. After changing a parameter, call recompute_document: it lists each one that failed or holds no solid. Call list_subelements again before changing their edges.
+
 ## Undo
 
 - Each update is one transaction. Call undo to revert a cell change and everything it moved.

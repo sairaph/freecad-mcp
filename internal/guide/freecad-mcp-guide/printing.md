@@ -22,6 +22,7 @@ Print each part in the pose it prints in. Lay every part flat on the plate with 
 - With the tools: create_object with obj_type Part::Fillet (or Part::Chamfer) and obj_properties {"Base": "Box", "Edges": ["Edge1", "Edge2"], "Radius": 1} (Chamfer: "Size"), or "Edges": [{"edge": "Edge1", "radius": 2}] for sizes that differ. A Fillet without Edges is refused. The reply lists the edges and sizes now, and names the objects it hid (booleans, compounds, Fillet, Chamfer, Extrusion, Revolution and Thickness hide their inputs, as FreeCAD does). update_object with a new Radius resizes the listed edges. The size is a number: FreeCAD cannot bind it to a spreadsheet cell.
 - In a script: one or two makeFillet calls, one for each set of edges with the same radius. Make one makeChamfer call for the edges a fillet fails on.
 - Do not retry edge by edge or search the shape for edges again after each try. Read code.md, and run the script with execute_code_headless in the background when it may take minutes.
+- Edge names can change when a dimension changes. After a parameter change, call recompute_document to see which Fillet or Chamfer failed or holds no solid, and call list_subelements again before changing their edges.
 
 ## Check
 
@@ -31,6 +32,7 @@ It reports per part its tight size, its free margin to each plate edge, and whic
 
 - printable is true only when something was checked, every part lies inside the plate and no two parts overlap.
 - Space the parts apart before you call it. Overlapping complex parts, such as threads, make the intersection slow.
+- Leave a few mm between each part and the plate edge: the edge zone is often not printable. The reply gives the free margin to each edge.
 - Overlap of two solids is the volume of their shared solid. A solid resting in another solid's cavity does not overlap it.
 - A mesh is checked by its bounding box, so a part nested in a mesh's box counts as overlapping. Space mesh parts apart. Read mesh.md for working on meshes.
 - When it reports a part outside the plate or an overlap, move the part with update_object on Placement, then call it again.

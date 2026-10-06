@@ -22,6 +22,7 @@ type recomputeFront struct {
 	ObjectCount  int    `yaml:"object_count"`
 	InvalidCount int    `yaml:"invalid_count"`
 	TouchedCount int    `yaml:"touched_count"`
+	EmptyCount   int    `yaml:"empty_count"`
 }
 
 func (s *Server) registerRecomputeTools() {
@@ -52,18 +53,28 @@ func (s *Server) recomputeDocument(ctx context.Context, _ *mcp.CallToolRequest, 
 	objectCount := intField(res, "object_count")
 	invalidCount := intField(res, "invalid_count")
 	touchedCount := intField(res, "touched_count")
+	emptyObjs, _ := res["empty_results"].([]any)
+	emptyCount := intField(res, "empty_count")
 	front := recomputeFront{
 		Document:     in.DocName,
 		Recomputed:   intField(res, "recomputed"),
 		ObjectCount:  objectCount,
 		InvalidCount: invalidCount,
 		TouchedCount: touchedCount,
+		EmptyCount:   emptyCount,
 	}
 
 	invalidNames := make(map[string]bool, len(invalidObjs))
 	var body strings.Builder
 	if invalidCount == 0 {
-		fmt.Fprintf(&body, "Document '%s' recomputed cleanly: %d object(s), none invalid.", in.DocName, objectCount)
+		switch {
+		case front.Recomputed == 0:
+			fmt.Fprintf(&body, "Document '%s': no object needed a recompute; %d object(s), none invalid.", in.DocName, objectCount)
+		case emptyCount == 0:
+			fmt.Fprintf(&body, "Document '%s' recomputed cleanly: %d object(s), none invalid.", in.DocName, objectCount)
+		default:
+			fmt.Fprintf(&body, "Document '%s' recomputed: %d object(s), none invalid.", in.DocName, objectCount)
+		}
 	} else {
 		fmt.Fprintf(&body, "Document '%s' recomputed with %d of %d object(s) invalid:\n", in.DocName, invalidCount, objectCount)
 		for _, item := range invalidObjs {
@@ -76,6 +87,18 @@ func (s *Server) recomputeDocument(ctx context.Context, _ *mcp.CallToolRequest, 
 		}
 		if boolField(res, "invalid_truncated") {
 			fmt.Fprintf(&body, "\n\n(showing the first %d of %d; call recompute_document again after fixing some of these)", len(invalidObjs), invalidCount)
+		}
+	}
+	if emptyCount > 0 {
+		var rows []string
+		for _, item := range emptyObjs {
+			if obj, ok := item.(map[string]any); ok {
+				rows = append(rows, fmt.Sprintf("%s (%s)", str(obj, "name"), str(obj, "reason")))
+			}
+		}
+		fmt.Fprintf(&body, "\n\nEmpty or no-op results: %s", strings.Join(rows, ", "))
+		if boolField(res, "empty_truncated") {
+			fmt.Fprintf(&body, " (showing the first %d of %d)", len(emptyObjs), emptyCount)
 		}
 	}
 	if touchedCount > 0 {

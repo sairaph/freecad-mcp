@@ -335,15 +335,28 @@ def visibility_of(obj, default: bool | None = None) -> bool | None:
         return default
 
 
+def solid_count_of(obj) -> int | None:
+    """The number of solids of ``obj``'s shape (0 for a null or unreadable
+    one), or None for an object that has no Shape."""
+    shape = getattr(obj, "Shape", None)
+    if shape is None:
+        return None
+    try:
+        return len(shape.Solids)
+    except Exception:
+        return 0
+
+
 def list_objects_gui(doc_name: str) -> list[dict]:
     """Return the compact object list of ``doc_name`` for get_objects(compact=True).
 
     Runs on the GUI thread. Rows: ``{"name", "label", "type", "state",
-    "valid", "parent", "visible"}``; ``[]`` for a document that is not open.
-    ``parent`` comes from ``tessellation.parent_map``, the same claim logic
+    "valid", "parent", "parents", "solids", "visible"}``; ``[]`` for a document
+    that is not open. ``parent`` (the first) and ``parents`` (every one) come
+    from ``tessellation.parent_lists``, the same claim logic
     ``tree_root_objects`` uses, so this list's top-level objects (an empty
     "parent") agree with what export_document and check_printability treat
-    as top level by default.
+    as top level by default. ``solids`` is None for an object with no Shape.
     """
     try:
         doc = App.getDocument(doc_name)
@@ -351,7 +364,7 @@ def list_objects_gui(doc_name: str) -> list[dict]:
         return []
     if doc is None:
         return []
-    parents = tessellation.parent_map(doc)
+    parents = tessellation.parent_lists(doc)
     return [
         {
             "name": obj.Name,
@@ -359,7 +372,9 @@ def list_objects_gui(doc_name: str) -> list[dict]:
             "type": obj.TypeId,
             "state": object_states(obj),
             "valid": _is_valid(obj),
-            "parent": parents.get(str(getattr(obj, "Name", "")), ""),
+            "parent": next(iter(parents.get(str(getattr(obj, "Name", "")), [])), ""),
+            "parents": parents.get(str(getattr(obj, "Name", "")), []),
+            "solids": solid_count_of(obj),
             "visible": visibility_of(obj),
         }
         for obj in doc.Objects

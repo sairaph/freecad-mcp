@@ -362,14 +362,14 @@ class FakeBoolean(FakeObject):
         self.PropertiesList: list = []
 
 
-def shaped(name: str, solids: int = 1, visible: bool = True) -> FakeObject:
-    box = FakeObject(Name=name, Shape=FakeShape(solids))
+def shaped(name: str, solids: int = 1, visible: bool = True, volume: float = 9503.5) -> FakeObject:
+    box = FakeObject(Name=name, Shape=FakeShape(solids, volume=volume))
     box.ViewObject = types.SimpleNamespace(Visibility=visible)
     return box
 
 
 def test_create_object_reports_the_shape_and_the_inputs_that_went_hidden() -> None:
-    block, hole = shaped("Block"), shaped("Hole")
+    block, hole = shaped("Block", volume=12000.0), shaped("Hole")
     clip = FakeBoolean("Part::Cut", FakeShape(), [block, hole])
     doc = FakeDocument(clip)
     doc.Objects.extend([block, hole])
@@ -461,3 +461,13 @@ def test_an_empty_body_has_no_shape_but_a_feature_with_a_null_shape_keeps_it() -
         result = object_factory.create_object_gui("Doc", object_factory.Object(name="Clip", type="Part::Cut", properties={}))
     assert result["shape"] == {"null": True}
     assert "warning" in result
+
+
+def test_a_cut_whose_tool_misses_the_base_warns_on_create_and_update() -> None:
+    base, tool = shaped("Block", volume=9503.5), shaped("Far")
+    clip = FakeBoolean("Part::Cut", FakeShape(volume=9503.5), [base, tool])
+    with load_object_factory(FakeDocument(clip)) as object_factory:
+        created = object_factory.create_object_gui("Doc", object_factory.Object(name="Clip", type="Part::Cut", properties={}))
+        edited = object_factory.edit_object_gui("Doc", object_factory.Object(name="Clip", properties={}))
+    expected = "The tool does not reach the base: nothing was removed. Check their Placement."
+    assert created["warning"] == expected and edited["warning"] == expected
