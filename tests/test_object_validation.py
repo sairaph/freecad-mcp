@@ -70,6 +70,7 @@ def load_object_factory(
     freecad = types.ModuleType("FreeCAD")
     freecad.Document = FakeDocument
     freecad.DocumentObject = object
+    freecad.Vector = type("Vector", (), {})
     freecad.Console = FakeConsole
     freecad.getDocument = lambda _name: doc
     # rpc_server.transactions wraps create_object_gui/edit_object_gui in a
@@ -260,3 +261,73 @@ def test_edit_object_returns_failure_with_existing_object_name() -> None:
     assert result["object_name"] == "Cut"
     assert "Base or Tool is not set" in result["error"]
     assert doc.recompute_count == 1
+
+
+class FakeFillet(FakeObject):
+    """A Part::Fillet: Base and Edges as FreeCAD keeps them."""
+
+    def __init__(self, valid: bool = True):
+        super().__init__(Name="Round", TypeId="Part::Fillet", valid=valid, State=["Up-to-date"] if valid else ["Invalid"])
+        self.Label = "Round"
+        self.Base = None
+        self.Edges: list = []
+        self.PropertiesList = ["Base", "Edges"]
+
+    def getTypeIdOfProperty(self, name: str) -> str:
+        return "Part::PropertyFilletEdges" if name == "Edges" else "App::PropertyLink"
+
+
+class FakeDocumentWithSource(FakeDocument):
+    def __init__(self, obj: object, source: object):
+        super().__init__(obj)
+        self.source = source
+
+    def getObject(self, name: str) -> object | None:
+        return self.source if name == self.source.Name else super().getObject(name)
+
+
+def outer_box() -> types.SimpleNamespace:
+    return types.SimpleNamespace(Name="Outer", Shape=types.SimpleNamespace(Edges=[object()] * 12), ViewObject=types.SimpleNamespace(Visibility=True))
+
+
+def test_create_object_lists_the_fillet_edges_and_hides_the_source() -> None:
+    source = outer_box()
+    doc = FakeDocumentWithSource(FakeFillet(), source)
+
+    with load_object_factory(doc) as object_factory:
+        request = object_factory.Object(name="Round", type="Part::Fillet", properties={"Base": "Outer", "Edges": ["Edge1", "Edge3"], "Radius": 4})
+        result = object_factory.create_object_gui("Doc", request)
+
+    assert result["success"] is True
+    assert result["edges"] == ["Edge1 r4", "Edge3 r4"]
+    assert result["hidden"] == ["Outer"]
+    assert source.ViewObject.Visibility is False
+
+
+def test_create_object_with_a_problem_hides_nothing() -> None:
+    source = outer_box()
+    doc = FakeDocumentWithSource(FakeFillet(valid=False), source)
+
+    with load_object_factory(doc) as object_factory:
+        request = object_factory.Object(name="Round", type="Part::Fillet", properties={"Base": "Outer", "Edges": ["Edge1"], "Radius": 4})
+        result = object_factory.create_object_gui("Doc", request)
+
+    assert result["success"] is False and "hidden" not in result
+    assert source.ViewObject.Visibility is True
+
+
+def test_edit_object_lists_the_edges_and_hides_the_source_only_when_it_is_relinked() -> None:
+    source = outer_box()
+    fillet = FakeFillet()
+    fillet.Base = source
+    fillet.Edges = [(1, 2.0, 2.0)]
+    doc = FakeDocumentWithSource(fillet, source)
+
+    with load_object_factory(doc) as object_factory:
+        result = object_factory.edit_object_gui("Doc", object_factory.Object(name="Round", properties={"Radius": 3}))
+        assert result["edges"] == ["Edge1 r3"] and "hidden" not in result
+        assert source.ViewObject.Visibility is True
+        result = object_factory.edit_object_gui("Doc", object_factory.Object(name="Round", properties={"Base": "Outer"}))
+
+    assert result["hidden"] == ["Outer"]
+    assert source.ViewObject.Visibility is False

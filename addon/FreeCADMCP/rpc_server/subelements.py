@@ -11,13 +11,20 @@ from typing import Any
 from rpc_server.errors import INVALID_INPUT, fail, tool_call
 from rpc_server.gui_task import run_on_gui
 from rpc_server.lookup import require_document, require_object
-from rpc_server.serialize import finite_or_none
+from rpc_server.serialize import finite_or_none, tight_bound_box
 
 
 SUBELEMENT_KINDS = ("faces", "edges", "all")
 
 # Fixed budget: list_subelements takes no timeout argument.
 _TIMEOUT = 60.0
+
+# An edge shorter than this (mm) is degenerate: the pole of a rounded corner.
+_DEGENERATE_MM = 1e-6
+
+# A face or edge whose top is within this many mm of the shape's lowest point
+# lies on the bottom, on the print plate.
+_BOTTOM_TOLERANCE_MM = 1e-4
 
 # Decimals kept in reported lengths, areas and coordinates (millimetres).
 _DECIMALS = 4
@@ -47,7 +54,17 @@ def _surface_kind(surface: Any, Part: Any) -> str:
     return "other"
 
 
-def _face_row(name: str, face: Any, Part: Any) -> dict[str, Any]:
+def _on_bottom(part: Any, lowest: float | None) -> bool:
+    """Whether ``part`` (a face or edge) lies wholly at the shape's lowest z."""
+    if lowest is None:
+        return False
+    try:
+        return tight_bound_box(part).ZMax <= lowest + _BOTTOM_TOLERANCE_MM
+    except Exception:
+        return False
+
+
+def _face_row(name: str, face: Any, Part: Any, lowest: float | None) -> dict[str, Any]:
     row: dict[str, Any] = {"name": name}
     try:
         surface = face.Surface
@@ -63,10 +80,12 @@ def _face_row(name: str, face: Any, Part: Any) -> dict[str, Any]:
     elif kind in ("cylinder", "sphere"):
         row["radius"] = _num(surface.Radius)
         row["axis"] = _vector(surface.Axis)
+    if _on_bottom(face, lowest):
+        row["on_bottom"] = True
     return row
 
 
-def _edge_row(name: str, edge: Any, Part: Any) -> dict[str, Any]:
+def _edge_row(name: str, edge: Any, Part: Any, lowest: float | None) -> dict[str, Any]:
     row: dict[str, Any] = {"name": name}
     try:
         curve = edge.Curve
@@ -80,6 +99,8 @@ def _edge_row(name: str, edge: Any, Part: Any) -> dict[str, Any]:
         kind = "other"
     row["curve"] = kind
     row["length"] = _num(edge.Length)
+    if edge.Length < _DEGENERATE_MM:
+        row["degenerate"] = True
     try:
         start = edge.valueAt(edge.FirstParameter)
         end = edge.valueAt(edge.LastParameter)
@@ -100,6 +121,8 @@ def _edge_row(name: str, edge: Any, Part: Any) -> dict[str, Any]:
     if kind == "circle":
         row["radius"] = _num(curve.Radius)
         row["center"] = _vector(curve.Center)
+    if not row.get("degenerate") and _on_bottom(edge, lowest):
+        row["on_bottom"] = True
     return row
 
 
@@ -129,13 +152,17 @@ def _list_subelements_gui(doc_name: str, obj_name: str, kind: str) -> dict[str, 
         "object": obj_name,
         "kind": kind,
     }
+    try:
+        lowest = finite_or_none(tight_bound_box(shape).ZMin)
+    except Exception:
+        lowest = None
     if kind in ("faces", "all"):
         result["faces"] = [
-            _face_row(f"Face{i}", face, Part) for i, face in enumerate(shape.Faces, 1)
+            _face_row(f"Face{i}", face, Part, lowest) for i, face in enumerate(shape.Faces, 1)
         ]
     if kind in ("edges", "all"):
         result["edges"] = [
-            _edge_row(f"Edge{i}", edge, Part) for i, edge in enumerate(shape.Edges, 1)
+            _edge_row(f"Edge{i}", edge, Part, lowest) for i, edge in enumerate(shape.Edges, 1)
         ]
     return result
 
@@ -145,10 +172,12 @@ def list_subelements(doc_name: str, obj_name: str, kind: str = "faces") -> dict[
 
     ``kind`` is "faces", "edges" or "all". Reply: ``{"success", "document",
     "object", "kind", "faces"?: [{"name", "surface", "area", "center",
-    "normal"? (planes), "radius"?, "axis"? (cylinders and spheres)}],
+    "normal"? (planes), "radius"?, "axis"? (cylinders and spheres),
+    "on_bottom"? (true when the face lies wholly at the shape's lowest z)}],
     "edges"?: [{"name", "curve", "length", "start", "end", "direction"?
     (lines), "along"? (a line parallel to the x, y or z axis), "radius"?,
-    "center"? (circles)}]}``.
+    "center"? (circles), "degenerate"? (true for an edge with no length),
+    "on_bottom"?}]}``.
     Units are millimetres and square millimetres. GUI thread, 60 s. No
     transaction.
     """

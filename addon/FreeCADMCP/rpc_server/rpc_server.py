@@ -847,17 +847,22 @@ class FreeCADRPC:
                 "message": "Python code executed successfully.\nOutput: " + output_buffer.getvalue(),
                 **tx_fields,
             }
+        failure = _err(res)
+        printed = output_buffer.getvalue()
+        if printed:
+            # What the script printed before it stopped shows where it got to.
+            failure = {**failure, "output": printed}
         if script_path is not None:
             # The file is the record of what ran; its traceback is already logged.
-            agent_error(f"Error executing script file {script_path}: {_err(res)['error']}\n")
-            return _err(res)
+            agent_error(f"Error executing script file {script_path}: {failure['error']}\n")
+            return failure
         # Log the offending code (truncated) to make errors traceable
         code_preview = code if len(code) <= 800 else code[:800] + "\n...(truncated)"
         agent_error(
             f"Error executing Python code: {res}\n"
             f"--- code ---\n{code_preview}\n--- end ---\n"
         )
-        return _err(res)
+        return failure
 
     def get_objects(self, doc_name: str, compact: bool = False) -> list[dict[str, Any]]:
         """List a document's objects; ``compact`` gives one short row per object."""

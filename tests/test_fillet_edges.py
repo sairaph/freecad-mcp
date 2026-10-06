@@ -77,3 +77,19 @@ def test_a_wrong_edge_fails_the_call_without_touching_the_edges(mapper) -> None:
     with pytest.raises(ValueError, match="Edge 'Edge40' does not exist"):
         mapper.set_object_property(None, obj, {"Edges": ["Edge40"], "Radius": 1})
     assert obj.Edges == [(1, 1.0, 1.0)]
+
+
+def test_the_edges_now_are_listed_with_their_sizes(mapper) -> None:
+    obj = Fillet()
+    obj.Edges = [(1, 4.0, 4.0), (3, 2.0, 4.0), (5, 0.25, 0.25)]
+    assert mapper.fillet_edges_text(obj, ["Radius"]) == ["Edge1 r4", "Edge3 r2 to r4", "Edge5 r0.25"]
+    chamfer = Fillet("Part::Chamfer")
+    chamfer.Edges = [(2, 1.5, 1.5)]
+    assert mapper.fillet_edges_text(chamfer, ["Edges", "Size"]) == ["Edge2 s1.5"]
+
+
+def test_nothing_is_listed_when_the_call_did_not_touch_the_edges(mapper) -> None:
+    obj = Fillet()
+    obj.Edges = [(1, 4.0, 4.0)]
+    assert mapper.fillet_edges_text(obj, ["Label"]) == []
+    assert mapper.fillet_edges_text(types.SimpleNamespace(TypeId="Part::Box", getTypeIdOfProperty=lambda _n: ""), ["Radius"]) == []

@@ -28,7 +28,9 @@ namespace.
 
 `execute_code_async` returns a `job_id` at once, without waiting for the GUI
 thread. `get_async_status(job_id)` reports whether the job is `running`, `done`,
-or `failed`, and includes the exception and traceback for failed jobs.
+or `failed`, and includes the exception and traceback for failed jobs. It never returns printed
+output: keep results in variables of the shared namespace and read them with
+`execute_code`.
 
 All running jobs and the 20 most recently completed jobs are retained in memory
 until FreeCAD exits. `get_async_status()` lists this history; `get_rpc_status`

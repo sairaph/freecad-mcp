@@ -20,8 +20,9 @@ import ObjectsFem
 
 from rpc_server.agent_log import agent_error, agent_warning
 from rpc_server.fem_loads import load_info
-from rpc_server.property_mapper import FILLET_TYPES, Object, quantity_values, set_object_property
+from rpc_server.property_mapper import FILLET_TYPES, Object, fillet_edges_text, quantity_values, set_object_property
 from rpc_server.object_validation import object_validity_error
+from rpc_server.source_visibility import hide_sources
 from rpc_server.transactions import active_document, transaction
 
 
@@ -303,9 +304,15 @@ def _keep_requested_label(created: Any, requested: str) -> None:
 
 def _name_and_placement_fields(obj: Any, requested: list) -> dict[str, Any]:
     """The reply fields that show what the caller cannot see otherwise: the
-    Label when it differs from the Name, and the Placement now when one of the
-    properties set was (part of) it."""
+    Label when it differs from the Name, the Placement now when one of the
+    properties set was (part of) it, and the edges of a fillet or chamfer."""
     fields: dict[str, Any] = {}
+    try:
+        edges = fillet_edges_text(obj, requested)
+        if edges:
+            fields["edges"] = edges
+    except Exception:
+        pass
     try:
         if obj.Label != obj.Name:
             fields["label"] = obj.Label
@@ -373,6 +380,10 @@ def create_object_gui(doc_name: str, obj: Object):
             quantities = quantity_values(created, requested)
             load = load_info(created)
             extra = _name_and_placement_fields(created, requested)
+            if not problem:
+                hidden = hide_sources(created, None)
+                if hidden:
+                    extra["hidden"] = hidden
         # The transaction commits above regardless of problem, so an object
         # that failed to compute stays in the document; undo removes it, or
         # the caller can fix it with update_object or remove it with
@@ -419,6 +430,10 @@ def edit_object_gui(doc_name: str, obj: Object):
             quantities = quantity_values(obj_ins, obj.properties)
             load = load_info(obj_ins)
             extra = _name_and_placement_fields(obj_ins, list(obj.properties))
+            if not problem:
+                hidden = hide_sources(obj_ins, obj.properties)
+                if hidden:
+                    extra["hidden"] = hidden
         # Commits above regardless of problem, so a property change that left
         # the object invalid stays applied; undo reverts it.
         if problem:

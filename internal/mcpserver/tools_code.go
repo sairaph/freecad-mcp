@@ -189,6 +189,9 @@ func (s *Server) executeCode(ctx context.Context, _ *mcp.CallToolRequest, in exe
 		}
 		out := reportedCode("execute code", res,
 			fix+"Call get_rpc_status if the GUI thread seems stuck. "+largerTimeout("execute_code"), codeFreeCAD)
+		if output := strings.TrimRight(str(res, "output"), " \t\r\n"); output != "" {
+			out.Content = append(out.Content, &mcp.TextContent{Text: "Output before the error:\n" + textBlock(output)})
+		}
 		if traceback != "" {
 			out.Content = append(out.Content, &mcp.TextContent{Text: "Traceback:\n" + textBlock(traceback)})
 		}

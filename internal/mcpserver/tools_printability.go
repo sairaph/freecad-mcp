@@ -52,7 +52,7 @@ func partFacts(obj map[string]any) []string {
 			formatNumber(size[0]), formatNumber(size[1]), formatNumber(size[2])))
 	}
 	if margin, ok := number(obj["free_margin_mm"]); ok {
-		fact := fmt.Sprintf("free margin to the plate edges %.4g mm", margin)
+		fact := fmt.Sprintf("free margin to the plate edges %.4g mm%s", margin, sideMargins(obj["margin_mm"]))
 		if margin == 0 {
 			fact += " (touches the plate edge, still inside)"
 		}
@@ -62,6 +62,32 @@ func partFacts(obj map[string]any) []string {
 		facts = append(facts, "a mesh, so overlap is checked by its bounding box")
 	}
 	return facts
+}
+
+// sideMargins lists the margin to each plate edge, " (x 10 / 186, y 10 / 206)",
+// with the top as ", z max 24" when the build height was given, or "" when the
+// reply has none.
+func sideMargins(v any) string {
+	m, _ := v.(map[string]any)
+	side := func(key string) (string, bool) {
+		f, ok := number(m[key])
+		return fmt.Sprintf("%.4g", f), ok
+	}
+	var parts []string
+	for _, axis := range []string{"x", "y"} {
+		low, okLow := side(axis + "_low")
+		high, okHigh := side(axis + "_high")
+		if okLow && okHigh {
+			parts = append(parts, fmt.Sprintf("%s %s / %s", axis, low, high))
+		}
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	if top, ok := side("z_high"); ok {
+		parts = append(parts, "z max "+top)
+	}
+	return " (" + strings.Join(parts, ", ") + ")"
 }
 
 func (s *Server) checkPrintability(ctx context.Context, _ *mcp.CallToolRequest, in checkPrintabilityInput) (*mcp.CallToolResult, any, error) {

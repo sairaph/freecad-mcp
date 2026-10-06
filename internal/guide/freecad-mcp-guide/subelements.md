@@ -12,12 +12,13 @@ A face row gives:
 - area in mm^2 and centre in global coordinates
 - normal for a plane, pointing out of the solid
 - radius and axis for a cylinder or sphere
+- "on the bottom" when the face lies wholly at the shape's lowest z
 
-An edge row gives name, curve (line, circle, other), length, and radius and centre for a circle.
+An edge row gives name, curve (line, circle, other), length, and radius and centre for a circle. It says "on the bottom" when it lies wholly at the shape's lowest z, and "degenerate" when it has no length (a pole of a rounded corner): never pick a degenerate edge.
 
 ## Pick by geometry
 
-- Bottom face: the plane with normal (0, 0, -1) and the lowest centre z.
+- Bottom face: the face that says "on the bottom".
 - Top face: the plane with normal (0, 0, 1) and the highest centre z.
 - Side face facing +X: the plane with normal (1, 0, 0).
 - Hole wall: a cylinder face. Its radius is the hole radius. Its axis is the hole direction.

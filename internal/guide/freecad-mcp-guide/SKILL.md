@@ -3,7 +3,7 @@ name: freecad-mcp-guide
 description: Workflows and rules for the freecad MCP server's tools. Use when building or changing FreeCAD models through create_object and update_object, choosing faces or edges with list_subelements, setting values with units or expressions, setting up and running a FEM analysis, checking and exporting parts for 3D printing, designing printed fits, threads and clips for a print material such as PETG or PLA, working with files on the FreeCAD computer, or sharing one FreeCAD with other agents.
 metadata:
   generator: freecad-mcp
-  version: "0.4.12"
+  version: "0.4.13"
 ---
 
 # FreeCAD MCP guide
@@ -53,7 +53,7 @@ Print a part:
 4. export_document to .stl or .3mf with overwrite true when replacing.
 
 Show the user a part:
-1. set_view with view_name and focus to leave the 3D view as they should see it. Use mode orbit to turn around it, or mode tour with stops to visit objects one by one.
+1. set_view with view_name and focus to leave the 3D view as they should see it. focus frames those objects and leaves the others visible; isolate shows only them. Use mode orbit to turn around it, or mode tour with stops to visit objects one by one.
 2. Call set_view with mode static to stop a running orbit or tour. get_view looks without changing the view.
 
 Simulate a part (FEM):

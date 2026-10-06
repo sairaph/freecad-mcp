@@ -298,6 +298,7 @@ def blend(a: Pose, b: Pose, s: float, bump: float = 0.0) -> Pose:
 
 _engines: dict[str, "_Engine"] = {}
 _last_stop: dict[str, str] = {}
+_last_kind: dict[str, str] = {}  # the kind of mode (orbit, tour) that stopped
 
 
 def _main_window() -> Any:
@@ -605,6 +606,7 @@ def stop_mode(doc_name: str, reason: str = "stopped") -> bool:
     except Exception:
         pass
     _last_stop[doc_name] = reason
+    _last_kind[doc_name] = engine.kind
     return True
 
 
@@ -700,6 +702,23 @@ def clear_stop(doc_name: str) -> None:
     """Forget why the last mode of ``doc_name`` stopped: a new set_view call
     must not report an old reason."""
     _last_stop.pop(doc_name, None)
+    _last_kind.pop(doc_name, None)
+
+
+def running_kind(doc_name: str) -> str | None:
+    """"orbit" or "tour" while a mode runs on ``doc_name``'s view, else None."""
+    engine = _engines.get(doc_name)
+    return engine.kind if engine is not None else None
+
+
+def earlier_stop(doc_name: str) -> tuple[str, str] | None:
+    """``(reason, kind)`` of a mode that stopped on its own since the last
+    set_view call (the user moved the view, a tour finished, the view closed),
+    else None. A stop a set_view call made itself is reported by that call."""
+    reason = _last_stop.get(doc_name)
+    if reason is None or reason in ("replaced", "reset"):
+        return None
+    return reason, _last_kind.get(doc_name, "")
 
 
 def check_visual_changes(

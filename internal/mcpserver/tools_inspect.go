@@ -192,6 +192,9 @@ func faceDetails(row map[string]any) string {
 	if v, ok := row["axis"]; ok {
 		parts = append(parts, "axis "+formatVector(v))
 	}
+	if boolField(row, "on_bottom") {
+		parts = append(parts, "on the bottom")
+	}
 	return strings.Join(parts, ", ")
 }
 
@@ -210,6 +213,12 @@ func edgeDetails(row map[string]any) string {
 	}
 	if v, ok := row["center"]; ok {
 		parts = append(parts, "center "+formatVector(v))
+	}
+	if boolField(row, "degenerate") {
+		parts = append(parts, "degenerate (no length, a pole of a rounded corner): never pick it")
+	}
+	if boolField(row, "on_bottom") {
+		parts = append(parts, "on the bottom")
 	}
 	return strings.Join(parts, ", ")
 }

@@ -180,3 +180,13 @@ def test_async_file_runs_and_a_failure_cites_the_file_and_line(
     job = wait_for_job(rpc, rpc.execute_file_async(bad)["job_id"])
     assert job["state"] == "failed" and job["error"] == "ValueError: line three"
     assert f'File "{bad}", line 3' in job["traceback"]
+
+
+def test_an_error_reply_carries_what_was_printed_before_it(rpc_module: types.ModuleType, tmp_path: Path) -> None:
+    rpc = rpc_module.FreeCADRPC()
+    result = rpc.execute_code("print('one')\nprint('two')\n1 / 0\n")
+    assert result["success"] is False
+    assert result["output"] == "one\ntwo\n"
+    result = rpc.execute_file(write_script(tmp_path, "print('from file')\nraise ValueError('x')\n"))
+    assert result["output"] == "from file\n"
+    assert "output" not in rpc.execute_code("1 / 0")

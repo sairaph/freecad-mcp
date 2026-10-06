@@ -1,11 +1,14 @@
 package mcpserver
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"image"
+	_ "image/png"
 	"math"
 	"net"
 	"sort"
@@ -396,6 +399,19 @@ func placementNote(body string, res map[string]any) string {
 	return body
 }
 
+// featureNote adds what a fillet or chamfer call left behind: its edges as they
+// are now, and the source objects it hid the way FreeCAD's own command does.
+func featureNote(body string, res map[string]any) string {
+	if edges := stringItems(res["edges"]); len(edges) > 0 {
+		body += "\n\nEdges now: " + strings.Join(edges, ", ") + "."
+	}
+	if hidden := stringItems(res["hidden"]); len(hidden) > 0 {
+		body += fmt.Sprintf("\n\nHidden: %s (the source of %s, as FreeCAD's own command does).",
+			strings.Join(hidden, ", "), str(res, "object_name"))
+	}
+	return body
+}
+
 // quantityNote appends the quantity properties a create or update call set,
 // with the value and unit FreeCAD gives them, to body. A number on a quantity
 // property is in FreeCAD's base units, so this shows the caller what was
@@ -519,6 +535,16 @@ func jsonBlock(v any) string {
 // to its last maxOutputBytes.
 func textBlock(s string) string {
 	return render.Fence(truncateOutput(s), "text")
+}
+
+// imageSizeText says the pixel size of a PNG, " Image: 800 x 281 px.", or ""
+// when its header cannot be read.
+func imageSizeText(png []byte) string {
+	cfg, _, err := image.DecodeConfig(bytes.NewReader(png))
+	if err != nil {
+		return ""
+	}
+	return fmt.Sprintf(" Image: %d x %d px.", cfg.Width, cfg.Height)
 }
 
 func imageContent(b64 string) (mcp.Content, bool) {
