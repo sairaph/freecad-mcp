@@ -99,7 +99,7 @@ func TestCreateAndUpdateListFilletEdgesAndHiddenSource(t *testing.T) {
 	} {
 		text := replyText(call(t, cs, tool, args))
 		if !strings.Contains(text, "Edges now: Edge1 r4, Edge3 r2 to r4.") ||
-			!strings.Contains(text, "Hidden: Outer (the source of Round, as FreeCAD's own command does).") {
+			!strings.Contains(text, "Hidden: Outer (inputs of Round).") {
 			t.Errorf("%s reply = %s", tool, text)
 		}
 	}
@@ -187,5 +187,65 @@ func TestSetViewFailureStillSaysWhichModeItStopped(t *testing.T) {
 func TestStoppedModeTextForAnOtherReasonHasNoReasonInIt(t *testing.T) {
 	if got := stoppedModeText("stopped", "orbit"); got != "The orbit had stopped." {
 		t.Errorf("text = %q", got)
+	}
+}
+
+func TestCreateAndUpdateReportTheShapeAndWarnOfAnEmptyResult(t *testing.T) {
+	solid := map[string]any{"solids": int64(1), "shells": int64(1), "faces": int64(6), "edges": int64(12), "size": []any{40.0, 20.0, 12.0}, "volume": 9503.46}
+	empty := map[string]any{"solids": int64(0), "shells": int64(0), "faces": int64(0), "edges": int64(0), "size": nil}
+	fc := addon(t, map[string]xmlrpctest.Handler{
+		"create_object": func([]any) (any, error) {
+			return map[string]any{"success": true, "object_name": "Clip", "shape": solid, "hidden": []any{"Block", "Hole"}}, nil
+		},
+		"edit_object": func([]any) (any, error) {
+			return map[string]any{"success": true, "object_name": "Clip", "shape": empty,
+				"warning": "The result holds no solid: its inputs do not overlap. Check their Placement."}, nil
+		},
+	})
+	cs := session(t, settingsFor(fc))
+	text := replyText(call(t, cs, "create_object", map[string]any{"doc_name": "D", "obj_name": "Clip", "obj_type": "Part::Cut", "include_screenshot": false}))
+	for _, want := range []string{"Shape: 1 solid, 40 x 20 x 12 mm, volume 9503.5 mm^3", "Hidden: Block, Hole (inputs of Clip)."} {
+		if !strings.Contains(text, want) {
+			t.Errorf("create reply lacks %q:\n%s", want, text)
+		}
+	}
+	text = replyText(call(t, cs, "update_object", map[string]any{"doc_name": "D", "obj_name": "Clip", "obj_properties": map[string]any{"Placement": map[string]any{}}, "include_screenshot": false}))
+	for _, want := range []string{"Shape: no solid, nothing in it", "Warning: The result holds no solid: its inputs do not overlap."} {
+		if !strings.Contains(text, want) {
+			t.Errorf("update reply lacks %q:\n%s", want, text)
+		}
+	}
+}
+
+func TestShapeTextNamesWhatAShapeWithoutASolidHolds(t *testing.T) {
+	for shape, want := range map[string]map[string]any{
+		"no solid, 2 shells, 10.5 x 10 x 0 mm": {"solids": int64(0), "shells": int64(2), "faces": int64(4), "edges": int64(8), "size": []any{10.5, 10.0, 0.0}},
+		"no solid, 1 face":                     {"solids": int64(0), "shells": int64(0), "faces": int64(1), "edges": int64(4), "size": nil},
+		"none (the shape is null)":             {"null": true},
+	} {
+		if got := shapeText(want); got != shape {
+			t.Errorf("shapeText(%v) = %q, want %q", want, got, shape)
+		}
+	}
+}
+
+func TestListObjectsCompactIsATable(t *testing.T) {
+	fc := addon(t, map[string]xmlrpctest.Handler{
+		"get_objects": func([]any) (any, error) {
+			return []any{
+				map[string]any{"name": "Box", "label": "Box", "type": "Part::Box", "state": []any{}, "valid": true, "parent": "", "visible": true},
+				map[string]any{"name": "Clip", "label": "Clip|2", "type": "Part::Cut", "state": []any{"Touched"}, "valid": false, "parent": "Body", "visible": nil},
+			}, nil
+		},
+	})
+	text := replyText(call(t, session(t, settingsFor(fc)), "list_objects", map[string]any{"doc_name": "D", "compact": true}))
+	for _, want := range []string{"| Name | Label | Type | State | Valid | Parent | Visible |", "| Box | Box | Part::Box |  | true |  | true |",
+		`| Clip | Clip\|2 | Part::Cut | Touched | false | Body | unknown |`} {
+		if !strings.Contains(text, want) {
+			t.Errorf("table lacks %q:\n%s", want, text)
+		}
+	}
+	if strings.Contains(text, `"name"`) {
+		t.Errorf("reply still holds JSON:\n%s", text)
 	}
 }

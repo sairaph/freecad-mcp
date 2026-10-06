@@ -69,6 +69,7 @@ print(bolt.isValid(), len(bolt.Solids), bolt.Volume)
 
 - Round with one or two Shape.makeFillet(radius, edges) calls per part, one call for each set of edges that share a radius.
 - For the edges a call fails on, make one Shape.makeChamfer(size, edges) call instead.
+- A script that builds a Part::Fillet or Part::Chamfer object sets Base to the object and Edges to a list of (edge number, radius1, radius2) tuples: fillet.Base = box; fillet.Edges = [(1, 2.0, 2.0), (3, 2.0, 2.0)].
 - Never retry edge by edge in a loop, and never search the whole shape for edges again after each try: every retry costs a full boolean.
 - Run the script with execute_code_headless, print a line after each call, and use a background job for anything that may take minutes.
 

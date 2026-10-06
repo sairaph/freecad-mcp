@@ -199,7 +199,7 @@ var toolTexts = map[string]toolText{
 
 	// Objects.
 	"list_objects": {
-		Description: `List the objects of a document with type and properties. Pass compact true for one short row per object (name, label, type, state, valid, parent, visible); use it first to learn the object names other tools take. No screenshot unless include_screenshot is true. An unknown document gives an empty list.`,
+		Description: `List the objects of a document with type and properties. Pass compact true for a table with one short row per object (name, label, type, state, valid, parent, visible); use it first to learn the object names other tools take. No screenshot unless include_screenshot is true. An unknown document gives an empty list.`,
 		Params: map[string]string{
 			"compact":            "one short row per object instead of all properties (default false)",
 			"include_screenshot": noScreenshotText,
@@ -214,8 +214,8 @@ var toolTexts = map[string]toolText{
 		Params:      map[string]string{"kind": "which sub-elements to list (default faces)"},
 	},
 	"create_object": {
-		Description: `Create one object in a document. Use the object name the reply returns: FreeCAD may rename (Box001). The reply lists each quantity set with its unit, the edges of a fillet or chamfer, and the source hidden: Fillet, Chamfer, Extrusion, Revolution and Thickness hide theirs, as FreeCAD does. An error before the object exists creates nothing; an object created but not computing stays, named in the reply: fix it with update_object or delete_object.
-FEM: create Fem::AnalysisPython first; pass analysis_name for its material, constraints and mesh; then call run_fem_analysis. Fem::MaterialCommon takes Material as {"Name": "Steel", "YoungsModulus": "210 GPa", "PoissonRatio": 0.3, "Density": "7900 kg/m^3"}. Fem::FemMeshGmsh takes Shape (the solid's name) and CharacteristicLengthMax/Min in mm, and is meshed on creation. A Fem::ConstraintForce acts along the outward normal of its face and a Fem::ConstraintPressure into it; Reversed true flips either, and the reply states the direction.`,
+		Description: `Create one object in a document. Use the name the reply returns (FreeCAD may rename: Box001). The reply gives the shape (solids, size, volume), warns of a result with no solid, and lists the quantities set, the edges of a fillet or chamfer, and the objects that went hidden (booleans, compounds, Fillet, Chamfer, Extrusion, Revolution, Thickness hide theirs). An error before the object exists creates nothing; one that does not compute stays: fix it with update_object or delete_object.
+FEM: create Fem::AnalysisPython first; pass analysis_name for its material, constraints and mesh; then run_fem_analysis. Fem::MaterialCommon takes Material as {"Name": "Steel", "YoungsModulus": "210 GPa", "PoissonRatio": 0.3, "Density": "7900 kg/m^3"}. Fem::FemMeshGmsh takes Shape (the solid's name) and CharacteristicLengthMax/Min in mm, and meshes on creation. A Fem::ConstraintForce acts along its face's outward normal, a Fem::ConstraintPressure into it; Reversed true flips either.`,
 		Params: map[string]string{
 			"obj_type":       `FreeCAD type, such as Part::Box, Part::Cylinder, Part::Cut, PartDesign::Body, Spreadsheet::Sheet, Fem::AnalysisPython, Fem::ConstraintFixed. Of the Python-only types only these work: Part::Tube (needs InnerRadius, OuterRadius, Height), Draft::Circle (Radius), Draft::Rectangle (Length, Height), Draft::Polygon (FacesNumber, Radius), Draft::Wire (Points, optional Closed); build others with execute_code`,
 			"obj_name":       "name for the new object; the reply gives the name actually used (Draft types name themselves and keep this as the Label)",
@@ -224,7 +224,7 @@ FEM: create Fem::AnalysisPython first; pass analysis_name for its material, cons
 		},
 	},
 	"update_object": {
-		Description: `Set properties of an existing object: dimensions, Placement, links, expressions, colors. obj_properties follows the same rules as in create_object. The reply lists each quantity it set with its unit, and the edges now of a fillet or chamfer; check the rest with get_object.`,
+		Description: `Set properties of an existing object: dimensions, Placement, links, expressions, colors. obj_properties follows the same rules as in create_object. The reply gives the shape now (solids, size, volume), warns of a result with no solid, lists each quantity it set with its unit, the edges now of a fillet or chamfer, and the objects that went hidden; check the rest with get_object.`,
 		Params:      map[string]string{"obj_properties": objPropsText},
 	},
 	"delete_object": {

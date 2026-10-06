@@ -3,7 +3,7 @@ name: freecad-mcp-guide
 description: Workflows and rules for the freecad MCP server's tools. Use when building or changing FreeCAD models through create_object and update_object, choosing faces or edges with list_subelements, setting values with units or expressions, setting up and running a FEM analysis, checking and exporting parts for 3D printing, designing printed fits, threads and clips for a print material such as PETG or PLA, working with files on the FreeCAD computer, or sharing one FreeCAD with other agents.
 metadata:
   generator: freecad-mcp
-  version: "0.4.13"
+  version: "0.4.14"
 ---
 
 # FreeCAD MCP guide
@@ -34,7 +34,7 @@ Call the tools of the freecad server by their bare names, such as create_object.
 ## Checklists
 
 Build a part:
-1. For a part that will be 3D printed and has holes, fits, threads or clips, read the material file for its material first, such as material-petg.md. Ask for the material when it is not known.
+1. For a part that will be 3D printed and has holes, fits, threads or clips, read the material file for its material first, such as material-petg.md, and features.md for screw head recesses, cable channels and edges to round. Ask for the material when it is not known.
 2. create_object for each solid, with Placement and dimensions in obj_properties.
 3. create_object for booleans such as Part::Cut with Base and Tool as object names.
 4. recompute_document after a series of changes. Fix each failed object with update_object.
@@ -79,6 +79,7 @@ Each file named here sits in the same folder as this SKILL.md (the folder freeca
 - session.md: remote access, holding and releasing FreeCAD. Read when a call is refused as in use, or when get_rpc_status shows a holder.
 - printing.md: laying parts on the plate, the layout check, export. Read before exporting for a printer.
 - material-petg.md, material-pla.md: clearances, threads, clips, strength and limits for one print material. Read the user's material before modelling parts that fit together.
+- features.md: screw head recesses, cable channels, which edges to round. Read before modelling them.
 - mesh.md: measuring a tessellated design, patching selected facets, comparing two meshes. Read before working on a mesh in a script.
 - parametric.md: spreadsheets as parameters. Read before binding a property to a cell.
 - code.md: execute_code, execute_code_async, execute_code_headless. Read before writing a script.

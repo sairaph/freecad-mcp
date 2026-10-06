@@ -3,6 +3,8 @@ package mcpserver
 import (
 	"context"
 	"fmt"
+	"strconv"
+	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/sairaph/mcp-wizard/render"
@@ -186,6 +188,9 @@ func (s *Server) listObjects(ctx context.Context, _ *mcp.CallToolRequest, in doc
 		count = len(list)
 	}
 	body := jsonBlock(objects)
+	if table, ok := compactObjectTable(objects); compact && ok {
+		body = table
+	}
 	if count == 0 {
 		body += "\nThe document is empty or not open. Call list_documents to see the open documents."
 	}
@@ -211,4 +216,32 @@ func (s *Server) getObject(ctx context.Context, _ *mcp.CallToolRequest, in objec
 	}
 	out := render.SuccessResult(objectFront{Document: in.DocName, Object: in.ObjName}, jsonBlock(object))
 	return s.withNotice(s.screenshot(ctx, conn, out, screenshotOptIn(in.IncludeScreenshot), viewString(in.ViewName), in.DocName)), nil, nil
+}
+
+// compactObjectTable renders the compact object list (one row per object) as a
+// markdown table, like list_documents. ok is false for an empty list or a row
+// that is not an object, which keep the JSON block.
+func compactObjectTable(objects any) (string, bool) {
+	list, _ := objects.([]any)
+	if len(list) == 0 {
+		return "", false
+	}
+	cell := func(s string) string { return strings.ReplaceAll(strings.ReplaceAll(s, "|", `\|`), "\n", " ") }
+	var b strings.Builder
+	b.WriteString("| Name | Label | Type | State | Valid | Parent | Visible |\n")
+	b.WriteString("| --- | --- | --- | --- | --- | --- | --- |\n")
+	for _, item := range list {
+		row, ok := item.(map[string]any)
+		if !ok {
+			return "", false
+		}
+		visible := "unknown"
+		if v, ok := row["visible"].(bool); ok {
+			visible = strconv.FormatBool(v)
+		}
+		fmt.Fprintf(&b, "| %s | %s | %s | %s | %t | %s | %s |\n", cell(str(row, "name")), cell(str(row, "label")),
+			cell(str(row, "type")), cell(strings.Join(stringItems(row["state"]), ", ")), boolField(row, "valid"),
+			cell(str(row, "parent")), visible)
+	}
+	return b.String(), true
 }

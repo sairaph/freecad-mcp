@@ -22,7 +22,8 @@ from rpc_server.agent_log import agent_error, agent_warning
 from rpc_server.fem_loads import load_info
 from rpc_server.property_mapper import FILLET_TYPES, Object, fillet_edges_text, quantity_values, set_object_property
 from rpc_server.object_validation import object_validity_error
-from rpc_server.source_visibility import hide_sources
+from rpc_server.serialize import shape_summary
+from rpc_server.source_visibility import hide_sources, newly_hidden, visibility_snapshot
 from rpc_server.transactions import active_document, transaction
 
 
@@ -336,6 +337,74 @@ def _name_and_placement_fields(obj: Any, requested: list) -> dict[str, Any]:
     return fields
 
 
+#: Types that make a solid from solid inputs, with the properties that hold the
+#: inputs: a result with no solid then means the inputs miss each other or one
+#: removes the other. Any other type with a solid in its OutList (a sketch
+#: attached to a face, an extrusion with Solid false) holds no solid by design.
+_SOLID_INPUTS = {
+    "Part::Cut": ("Base", "Tool"),
+    "Part::Common": ("Base", "Tool"),
+    "Part::Fuse": ("Base", "Tool"),
+    "Part::MultiFuse": ("Shapes",),
+    "Part::MultiCommon": ("Shapes",),
+    "Part::Fillet": ("Base",),
+    "Part::Chamfer": ("Base",),
+    "Part::Thickness": ("Faces",),
+    "Part::Offset": ("Source",),
+    "Part::Mirroring": ("Source",),
+}
+
+_EMPTY_RESULT_TEXT = {
+    "Part::Common": "its inputs do not overlap",
+    "Part::MultiCommon": "its inputs do not overlap",
+    "Part::Cut": "the tool removes all of the base",
+}
+
+
+def _linked_objects(value: Any) -> list:
+    """The objects a link value holds: one object, a list of them, or
+    ``(object, sub-elements)`` pairs."""
+    if isinstance(value, (tuple, list)):
+        if len(value) == 2 and isinstance(value[1], (tuple, list, str)) and hasattr(value[0], "Name"):
+            return [value[0]]
+        return [item for entry in value for item in _linked_objects(entry)]
+    return [value] if hasattr(value, "Name") else []
+
+
+def _holds_solid(obj: Any) -> bool:
+    try:
+        return bool(obj.Shape.Solids)
+    except Exception:
+        return False
+
+
+def _shape_fields(obj: Any) -> dict[str, Any]:
+    """The reply fields for an object with a Shape: what the shape holds, and a
+    warning when a boolean or a solid-making feature holds no solid although
+    one of its inputs does. A container with no feature in it yet (an empty
+    PartDesign::Body) has a null shape and nothing to report."""
+    if getattr(obj, "Shape", None) is None:
+        return {}
+    summary = shape_summary(obj.Shape)
+    if summary is None:
+        return {}
+    if summary.get("null") and hasattr(obj, "Group") and not obj.Group:
+        return {}
+    fields: dict[str, Any] = {"shape": summary}
+    try:
+        inputs = [
+            item
+            for prop in _SOLID_INPUTS.get(obj.TypeId, ())
+            for item in _linked_objects(getattr(obj, prop, None))
+        ]
+        if not summary.get("solids") and any(_holds_solid(item) for item in inputs):
+            why = _EMPTY_RESULT_TEXT.get(obj.TypeId, "its inputs do not overlap or one removes all of the other")
+            fields["warning"] = f"The result holds no solid: {why}. Check their Placement."
+    except Exception:
+        pass
+    return fields
+
+
 def create_object_gui(doc_name: str, obj: Object):
     """Create an object in ``doc_name`` according to ``obj.type``.
 
@@ -361,6 +430,7 @@ def create_object_gui(doc_name: str, obj: Object):
                     "Fem::AnalysisPython container to add the mesh to."
                 )
             existing = {o.Name for o in doc.Objects}
+            shown = visibility_snapshot(doc)
             requested = list(obj.properties)
             try:
                 if obj.type == "Fem::FemMeshGmsh":
@@ -381,7 +451,9 @@ def create_object_gui(doc_name: str, obj: Object):
             load = load_info(created)
             extra = _name_and_placement_fields(created, requested)
             if not problem:
-                hidden = hide_sources(created, None)
+                hide_sources(created, None)
+                extra.update(_shape_fields(created))
+                hidden = newly_hidden(doc, shown)
                 if hidden:
                     extra["hidden"] = hidden
         # The transaction commits above regardless of problem, so an object
@@ -424,6 +496,7 @@ def edit_object_gui(doc_name: str, obj: Object):
         # See create_object_gui: hold doc active for the transaction's whole
         # life so FreeCAD does not open an empty linked transaction elsewhere.
         with active_document(doc), transaction("update_object") as tx:
+            shown = visibility_snapshot(doc)
             set_object_property(doc, obj_ins, obj.properties)
             doc.recompute()
             problem = object_validity_error(obj_ins)
@@ -431,7 +504,9 @@ def edit_object_gui(doc_name: str, obj: Object):
             load = load_info(obj_ins)
             extra = _name_and_placement_fields(obj_ins, list(obj.properties))
             if not problem:
-                hidden = hide_sources(obj_ins, obj.properties)
+                hide_sources(obj_ins, obj.properties)
+                extra.update(_shape_fields(obj_ins))
+                hidden = newly_hidden(doc, shown)
                 if hidden:
                     extra["hidden"] = hidden
         # Commits above regardless of problem, so a property change that left

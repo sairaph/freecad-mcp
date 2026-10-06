@@ -399,14 +399,22 @@ func placementNote(body string, res map[string]any) string {
 	return body
 }
 
-// featureNote adds what a fillet or chamfer call left behind: its edges as they
-// are now, and the source objects it hid the way FreeCAD's own command does.
+// featureNote adds what a create or update call left behind: the shape the
+// object now holds, a warning when that is no solid although an input has one,
+// the edges of a fillet or chamfer as they are now, and the objects that went
+// from visible to hidden (the inputs FreeCAD hides itself).
 func featureNote(body string, res map[string]any) string {
+	if shape, ok := res["shape"].(map[string]any); ok {
+		body += "\n\nShape: " + shapeText(shape)
+	}
+	if warning := str(res, "warning"); warning != "" {
+		body += "\n\nWarning: " + warning
+	}
 	if edges := stringItems(res["edges"]); len(edges) > 0 {
 		body += "\n\nEdges now: " + strings.Join(edges, ", ") + "."
 	}
 	if hidden := stringItems(res["hidden"]); len(hidden) > 0 {
-		body += fmt.Sprintf("\n\nHidden: %s (the source of %s, as FreeCAD's own command does).",
+		body += fmt.Sprintf("\n\nHidden: %s (inputs of %s).",
 			strings.Join(hidden, ", "), str(res, "object_name"))
 	}
 	return body
@@ -670,4 +678,43 @@ func argumentProblem(err error) string {
 	}
 	msg = strings.TrimPrefix(msg, "json: ")
 	return msg
+}
+
+// shapeText describes the shape block of a create or update reply: the solid
+// count, the tight box and the volume, or what a shape without a solid holds.
+func shapeText(shape map[string]any) string {
+	if boolField(shape, "null") {
+		return "none (the shape is null)"
+	}
+	plural := func(n int, noun string) string {
+		if n == 1 {
+			return "1 " + noun
+		}
+		return fmt.Sprintf("%d %ss", n, noun)
+	}
+	var parts []string
+	if solids := intField(shape, "solids"); solids > 0 {
+		parts = append(parts, plural(solids, "solid"))
+	} else {
+		held := "nothing in it"
+		for _, kind := range []string{"shell", "face", "edge"} {
+			if n := intField(shape, kind+"s"); n > 0 {
+				held = plural(n, kind)
+				break
+			}
+		}
+		parts = append(parts, "no solid, "+held)
+	}
+	if size, ok := shape["size"].([]any); ok && len(size) == 3 {
+		dims := make([]string, 3)
+		for i, v := range size {
+			f, _ := number(v)
+			dims[i] = strconv.FormatFloat(math.Round(f*100)/100, 'f', -1, 64)
+		}
+		parts = append(parts, strings.Join(dims, " x ")+" mm")
+	}
+	if volume, ok := number(shape["volume"]); ok {
+		parts = append(parts, fmt.Sprintf("volume %.1f mm^3", volume))
+	}
+	return strings.Join(parts, ", ")
 }
