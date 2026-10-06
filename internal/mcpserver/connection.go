@@ -1018,7 +1018,7 @@ func listenerRefusalError(hostPort string, statusCode, retryAfter int, body list
 			Message: fmt.Sprintf("The FreeCAD computer %s asks for a password, and none or a different one was given.",
 				host),
 			Hint: fmt.Sprintf("Enter the password set in \"Share this PC\" on that computer: use freecad-mcp > "+
-				"Connect to FreeCAD on another computer, or run `%s connect --host %s --password-stdin` and "+
+				"Use another computer, or run `%s connect --host %s --password-stdin` and "+
 				"restart the AI client, or set %s in its config for this server.",
 				domain.BinaryName, host, domain.EnvToken) + wslLoopback401Note(host),
 		}
@@ -1056,7 +1056,7 @@ func listenerRefusalError(hostPort string, statusCode, retryAfter int, body list
 			Code: render.CodeUnavailable,
 			Message: fmt.Sprintf("The listener on %s refuses this computer for %d s after too many wrong passwords.",
 				host, n),
-			Hint: fmt.Sprintf("Check the stored password (freecad-mcp > Connect to FreeCAD on another computer, "+
+			Hint: fmt.Sprintf("Check the stored password (freecad-mcp > Use another computer, "+
 				"or `%s connect --host %s --password-stdin`), then call get_rpc_status with {} after that time.",
 				domain.BinaryName, host),
 		}

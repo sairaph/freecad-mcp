@@ -281,22 +281,111 @@ func reportAddonResults(w io.Writer, results []addonResult) int {
 		}
 		fmt.Fprintf(w, "  [ok]   %s addon %s\n         %s%s\n", verb, version, r.Target.AddonDir(), note)
 	}
-	unchanged := true
-	for _, r := range results {
-		unchanged = unchanged && r.Err == nil && r.Current && !r.SettingChanged
-	}
-	// Nothing was written anywhere: no restart is needed.
-	if code == 0 && len(results) > 0 && !unchanged {
-		switch {
-		case mixed:
-			fmt.Fprintln(w, "  Restart FreeCAD if it is running. Where auto-start is off, select the MCP Addon\n  workbench and click Start RPC Server.")
-		case on > 0:
-			fmt.Fprintln(w, "  The RPC server starts with FreeCAD. Restart FreeCAD if it is running.")
-		default:
-			fmt.Fprintln(w, "  Restart FreeCAD, select the MCP Addon workbench and click Start RPC Server.")
-		}
+	if advice := addonRestartAdvice(results); advice != "" {
+		fmt.Fprintln(w, "  "+advice)
 	}
 	return code
+}
+
+// addonRestartAdvice says what to do in FreeCAD after the installs in
+// results, or "" when nothing was written anywhere or an install failed.
+func addonRestartAdvice(results []addonResult) string {
+	var on, off int
+	unchanged := true
+	for _, r := range results {
+		if r.Err != nil {
+			return ""
+		}
+		unchanged = unchanged && r.Current && !r.SettingChanged
+		if r.AutoStart {
+			on++
+		} else {
+			off++
+		}
+	}
+	switch {
+	case len(results) == 0 || unchanged:
+		return ""
+	case on > 0 && off > 0:
+		return "Restart FreeCAD if it is running. Where auto-start is off, select the MCP Addon workbench and click Start RPC Server."
+	case on > 0:
+		return "The RPC server starts with FreeCAD. Restart FreeCAD if it is running."
+	}
+	return "Restart FreeCAD, select the MCP Addon workbench and click Start RPC Server."
+}
+
+// addonVerb says what an install did to one copy of the addon.
+func addonVerb(r addonResult, version string) string {
+	switch {
+	case r.Current:
+		return "already current " + version
+	case r.Replaced && r.Previous != "":
+		return "updated " + r.Previous + " to " + version
+	case r.Replaced:
+		return "replaced with " + version
+	}
+	return "installed " + version
+}
+
+// addonChangeWord is what an install into a copy that holds installed (""
+// when none) would do, as a status word.
+func addonChangeWord(installed, want string) string {
+	switch {
+	case installed == "":
+		return "install " + want
+	case installed == want:
+		return "reinstall " + want
+	}
+	return "update " + installed + " to " + want
+}
+
+// addonPlanLines lays out what an install into targets would change: for
+// each folder "Install into" with the path under it, the status word and, with
+// autoStart, the start-with-FreeCAD setting it would leave.
+func addonPlanLines(p palette, targets []addoninstall.Target, width int, autoStart bool) []string {
+	want, _, _ := addoninstall.EmbeddedVersion()
+	var lines []string
+	for i, t := range targets {
+		if i > 0 {
+			lines = append(lines, "")
+		}
+		installed, _ := addoninstall.InstalledVersion(t)
+		auto := "on"
+		if on, set := addoninstall.AutoStartSetting(t); set && !on {
+			auto = "off"
+		}
+		lines = append(lines, "  Install into")
+		for _, l := range wrapText(t.AddonDir(), width-6) {
+			lines = append(lines, "    "+p.dim.Render(l))
+		}
+		rows := []statusRow{{Label: "Status", Status: addonChangeWord(installed, want), Tone: toneOK}}
+		if autoStart {
+			rows = append(rows, statusRow{Label: "Start with FreeCAD", Status: auto, Tone: toneOK})
+		}
+		lines = append(lines, renderStatusRows(p, rows, width)...)
+	}
+	return lines
+}
+
+// addonResultRows is the report of an install: one row per folder.
+func addonResultRows(results []addonResult) []reportRow {
+	version, _, _ := addoninstall.EmbeddedVersion()
+	var rows []reportRow
+	for _, r := range results {
+		row := reportRow{Name: "FreeCAD addon", Outcome: toneOK}
+		if r.Err != nil {
+			row.Outcome = toneFailed
+			row.Detail = r.Target.AddonDir() + ": " + r.Err.Error()
+		} else {
+			auto := "start with FreeCAD off"
+			if r.AutoStart {
+				auto = "start with FreeCAD on"
+			}
+			row.Detail = addonVerb(r, version) + ", " + auto
+		}
+		rows = append(rows, row)
+	}
+	return rows
 }
 
 const freecadNotFound = "  FreeCAD was not found. Install FreeCAD (and start it once), then run\n" +
@@ -700,19 +789,10 @@ func (s *addonStep) View(state *AppState) string {
 		fmt.Fprintf(&b, "  %s Asking FreeCAD where its addons live...\n", tui.SpinFrame(state.Spinner.Frame))
 	case addonChoosing:
 		version, _, _ := addoninstall.EmbeddedVersion()
-		fmt.Fprintf(&b, "  The MCP server talks to FreeCAD through an addon (version %s).\n  When setup finishes, it is installed into:\n\n", version)
-		for _, t := range a.Targets {
-			line := "    " + t.AddonDir()
-			if v, err := addoninstall.InstalledVersion(t); err == nil {
-				if v == version {
-					line += "  (" + v + " is installed; it is reinstalled)"
-				} else {
-					line += "  (replaces " + v + ")"
-				}
-			}
-			b.WriteString(line + "\n")
-		}
+		width := screenSize{state.Width, state.Height}.width()
+		b.WriteString(wizardParagraph(state, "The MCP server talks to FreeCAD through an addon (version "+version+"). Setup installs it when it finishes."))
 		b.WriteString("\n")
+		b.WriteString(strings.Join(addonPlanLines(newPalette(), a.Targets, width, false), "\n") + "\n\n")
 		b.WriteString(tui.ToggleList(theme, []tui.ToggleItem{{
 			ID: "autostart", Label: "Start the RPC server with FreeCAD", Tier: "recommended", Checked: a.AutoStart,
 		}}, 0))

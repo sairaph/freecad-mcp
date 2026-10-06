@@ -92,11 +92,11 @@ To install a specific release instead of the latest, pass `-Version`
 (PowerShell) or set `VERSION` (sh):
 
 ```powershell
-& ([scriptblock]::Create((irm https://github.com/sairaph/freecad-mcp/releases/download/v0.4.27/install.ps1))) -Version v0.4.27
+& ([scriptblock]::Create((irm https://github.com/sairaph/freecad-mcp/releases/download/v0.4.28/install.ps1))) -Version v0.4.28
 ```
 
 ```sh
-curl -fsSL https://github.com/sairaph/freecad-mcp/releases/download/v0.4.27/install.sh | VERSION=v0.4.27 sh
+curl -fsSL https://github.com/sairaph/freecad-mcp/releases/download/v0.4.28/install.sh | VERSION=v0.4.28 sh
 ```
 
 `install-addon --refresh` (and so `update`) compares the installed addon's
@@ -180,7 +180,7 @@ an array instead: `-ConfigureArgs "--yes", "--token", "my token"`.
 
 | Command | Purpose |
 | --- | --- |
-| `freecad-mcp` | In a terminal: an interactive menu (doctor, addon install, connection check, Share this PC, Connect to FreeCAD on another computer). Started by an AI client: the MCP server. |
+| `freecad-mcp` | In a terminal: an interactive menu (Doctor, Install addon, Connection, Share this PC, Use another computer; the header shows whether FreeCAD runs, whether sharing is on and which computer is used). Started by an AI client: the MCP server. |
 | `freecad-mcp mcp` | Run the MCP server over stdio. It serves FreeCAD itself and does not bridge to other MCP servers: `--remote <url>` is refused. |
 | `freecad-mcp install` / `configure` | The setup wizard (`--yes` for unattended). |
 | `freecad-mcp add` | Register the server in the current project's client configs instead of the global ones. |
@@ -237,7 +237,7 @@ the matching copy, so the two normally match. The MCP server checks that the
 running addon speaks its protocol version: if it does not, for example after
 copying an older addon by hand, the next tool reply starts with a warning that
 says which side to update, and `get_rpc_status` and `check-connection` report
-it. This release speaks protocol 8 (addon 0.4.27): FreeCAD can be shared with
+it. This release speaks protocol 8 (addon 0.4.28): FreeCAD can be shared with
 other devices (see [remote access](remote-access.md) for Share this PC,
 Connect, the listener, and the multi-agent session lock that comes with it);
 `release_session` and `close_freecad` manage that session; `get_rpc_status`

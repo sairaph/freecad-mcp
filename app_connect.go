@@ -1,29 +1,16 @@
 package main
 
-// The app's "Connect to FreeCAD on another computer" page: host, port and
-// password, an async Test connection and Save, and "use this computer
-// instead" (which removes the saved connection), each reporting through the
-// shared remote.go logic (testConnect, saveConnection, clearConnection).
+// The app's "Use another computer" page: host, port and password, an async
+// Test connection action, Save (enter) and "Use this computer instead" (which
+// removes the saved connection), each reporting through the shared remote.go
+// logic (testConnect, saveConnection, clearConnection). connectSuccessLine and
+// connectErrLine are reused from wizard_connect.go, same package.
 //
-// Fields are plain strings edited with backspace and typed runes, the same
-// hand-rolled key handling as app_share.go and wizard_connect.go's host and
-// password screens (connectSuccessLine and connectErrLine are reused from
-// wizard_connect.go, same package). This avoids bubbles/textinput, which
-// pulls in github.com/atotto/clipboard, a dependency go.sum does not have
-// and this page does not add.
-//
-// t, s and d act as shortcuts only while no field is focused
-// (p.focus == connectFieldNone); with a field focused, every printable key
-// (including those letters, space, "y" and "n") types into it instead, so a
-// host or password containing one of them can still be typed. Tab starts
-// editing at the Host field; esc leaves editing without leaving the page, a
-// second esc then leaves it. Footer: "tab edit fields   t test connection
-// s save   d use this computer instead   esc back" with no field focused,
-// "tab next field   esc stop editing" while editing one.
+// The fields are always editable while focused (see form.go), so there are no
+// letter shortcuts: the two actions are rows of the form.
 
 import (
 	"context"
-	"fmt"
 	"strconv"
 	"strings"
 
@@ -33,33 +20,28 @@ import (
 	"github.com/sairaph/freecad-mcp/internal/domain"
 )
 
-// connectField values are the tab order of this page's fields.
+// Control ids of the Connect form.
 const (
-	connectFieldHost = iota
-	connectFieldPort
-	connectFieldPassword
-	connectFieldCount
+	connectHost     = "host"
+	connectPort     = "port"
+	connectPassword = "password"
+	connectTest     = "test"
+	connectClear    = "clear"
 )
-
-// connectFieldNone is p.focus while no field is being edited: t, s and d
-// then act as the page's shortcuts. Tab from here starts editing the Host
-// field; esc from a field returns here without leaving the page (a second
-// esc then leaves it). While a field is focused every printable key,
-// including "t", "s", "d" and space, types into it instead of triggering an
-// action, so a password (or host) containing one of those can still be typed.
-const connectFieldNone = -1
 
 // connectPage is the Connect page's state. Host, port and password start
 // from the stored connection (loadCredential), if any, and are written only
 // on Save (through remote.go's saveConnection); nothing is written while the
 // page is only being edited or tested.
 type connectPage struct {
-	ctx context.Context
+	ctx  context.Context
+	p    palette
+	size screenSize
 
-	host     string
-	port     string
-	password string
-	focus    int
+	form *form
+	// passwordLoaded is true while the password field still holds the one
+	// stored with the loaded host; editing the host clears it.
+	passwordLoaded bool
 
 	testing bool
 	saving  bool
@@ -73,21 +55,34 @@ type connectPage struct {
 }
 
 func newConnectPage(ctx context.Context) appPage {
-	p := &connectPage{ctx: ctx, port: strconv.Itoa(domain.DefaultListenerPort), focus: connectFieldNone}
+	p := &connectPage{ctx: ctx, p: newPalette()}
 
-	if token, host, port, err := loadCredentials(ctx); err == nil && host != "" {
-		p.host = host
-		if port != "" {
-			p.port = port
+	host := newTextField(p.p, "192.168.1.20 or a host name", false)
+	port := newTextField(p.p, strconv.Itoa(domain.DefaultListenerPort), false)
+	port.SetValue(strconv.Itoa(domain.DefaultListenerPort))
+	password := newTextField(p.p, "only if that computer set one", true)
+
+	if token, h, prt, err := loadCredentials(ctx); err == nil && h != "" {
+		host.SetValue(h)
+		if prt != "" {
+			port.SetValue(prt)
 		}
 		// The stored password belongs to this stored connection; without a
 		// host it would be this computer's own "Share this PC" password
 		// (or none), which does not belong on another computer's field.
 		if token != "" {
-			p.password = token
+			password.SetValue(token)
+			p.passwordLoaded = true
 		}
 	}
 
+	p.form = newForm(p.p,
+		&control{id: connectHost, kind: kindText, label: "Host", input: host},
+		&control{id: connectPort, kind: kindText, label: "Port", input: port, digits: true},
+		&control{id: connectPassword, kind: kindText, label: "Password", input: password},
+		&control{id: connectTest, kind: kindAction, label: "Test connection"},
+		&control{id: connectClear, kind: kindAction, label: "Use this computer instead"},
+	)
 	return p
 }
 
@@ -104,8 +99,14 @@ type connectClearDoneMsg struct{ err error }
 
 func (p *connectPage) busy() bool { return p.testing || p.saving || p.clearing }
 
+func (p *connectPage) value(id string) string { return p.form.control(id).input.Value() }
+
 func (p *connectPage) Update(msg tea.Msg) (bool, tea.Cmd) {
 	switch m := msg.(type) {
+	case tea.WindowSizeMsg:
+		p.size = screenSize{m.Width, m.Height}
+		p.form.setWidth(p.size.width())
+		return false, nil
 	case connectTestDoneMsg:
 		p.testing = false
 		p.resultLines = m.lines
@@ -115,7 +116,7 @@ func (p *connectPage) Update(msg tea.Msg) (bool, tea.Cmd) {
 		if m.err != nil {
 			p.resultLines = []string{"[fail] " + m.err.Error()}
 		} else {
-			p.resultLines = []string{"Saved. AI clients use it the next time they start freecad-mcp (restart them)."}
+			p.resultLines = []string{"[ok] Saved. AI clients use it the next time they start freecad-mcp (restart them)."}
 		}
 		return false, nil
 	case connectClearDoneMsg:
@@ -123,16 +124,17 @@ func (p *connectPage) Update(msg tea.Msg) (bool, tea.Cmd) {
 		if m.err != nil {
 			p.resultLines = []string{"[fail] " + m.err.Error()}
 		} else {
-			p.host = ""
-			p.port = strconv.Itoa(domain.DefaultListenerPort)
-			p.password = ""
-			p.resultLines = []string{"Removed. AI clients use FreeCAD on this computer the next time they start freecad-mcp."}
+			p.form.control(connectHost).input.SetValue("")
+			p.form.control(connectPort).input.SetValue(strconv.Itoa(domain.DefaultListenerPort))
+			p.form.control(connectPassword).input.SetValue("")
+			p.passwordLoaded = false
+			p.resultLines = []string{"[ok] Removed. AI clients use FreeCAD on this computer the next time they start freecad-mcp."}
 		}
 		return false, nil
 	}
 
 	if tui.IsSpinMsg(msg) {
-		if p.testing || p.saving || p.clearing {
+		if p.busy() {
 			p.spinnerFrame++
 			return false, tui.Spinner()
 		}
@@ -161,116 +163,76 @@ func (p *connectPage) Update(msg tea.Msg) (bool, tea.Cmd) {
 		return false, nil
 	}
 
-	// While a field is focused, every printable key (including "t", "s",
-	// "d" and space) types into it; only tab and esc are reserved, so a
-	// host or password that itself contains one of the shortcut letters can
-	// still be typed. t/s/d act as shortcuts only with no field focused.
-	if p.focus != connectFieldNone {
-		switch key.String() {
-		case "esc":
-			p.focus = connectFieldNone
-		case "tab":
-			p.focus = (p.focus + 1) % connectFieldCount
-		case "backspace":
-			p.editField(func(s string) string {
-				r := []rune(s)
-				if len(r) == 0 {
-					return s
-				}
-				return string(r[:len(r)-1])
-			})
-			if p.focus == connectFieldHost {
-				// The prefilled password belongs to the host that was
-				// loaded, not whatever the user is now editing it into.
-				p.password = ""
-			}
-		default:
-			if len(key.Runes) > 0 {
-				text := string(key.Runes)
-				p.editField(func(s string) string { return s + digitsOnlyIfPort(p.focus, text) })
-				if p.focus == connectFieldHost {
-					p.password = ""
-				}
-			}
-		}
-		return false, nil
-	}
-
 	switch key.String() {
 	case "esc":
 		return true, nil
-	case "tab":
-		p.focus = connectFieldHost
-	case "t":
-		return false, p.startTest()
-	case "s":
+	case "enter":
+		switch p.form.current().id {
+		case connectTest:
+			return false, p.startTest()
+		case connectClear:
+			p.confirmingClear = true
+			p.resultLines = nil
+			return false, nil
+		}
 		return false, p.startSave()
-	case "d":
-		p.confirmingClear = true
-		p.resultLines = nil
 	}
-	return false, nil
+	changed, cmd := p.form.handleKey(key)
+	if changed && p.form.current().id == connectHost && p.passwordLoaded {
+		// The loaded password belongs to the host that was loaded, not
+		// whatever the user is now editing it into.
+		p.form.control(connectPassword).input.SetValue("")
+		p.passwordLoaded = false
+	}
+	return false, cmd
 }
 
-// editField applies edit to the currently focused field.
-func (p *connectPage) editField(edit func(string) string) {
-	switch p.focus {
-	case connectFieldHost:
-		p.host = edit(p.host)
-	case connectFieldPort:
-		p.port = edit(p.port)
-	case connectFieldPassword:
-		p.password = edit(p.password)
-	}
-}
-
-// digitsOnlyIfPort keeps only decimal digits of text when field is the port
-// field; every other field accepts any typed text unchanged.
-func digitsOnlyIfPort(field int, text string) string {
-	if field != connectFieldPort {
-		return text
-	}
-	var b strings.Builder
-	for _, r := range text {
-		if r >= '0' && r <= '9' {
-			b.WriteRune(r)
+// connectPageFields reads and validates the fields, putting each error under
+// its field and the focus on the first one, and returning ok false when any is
+// invalid.
+func (p *connectPage) connectPageFields() (host string, port int, password string, ok bool) {
+	var first string
+	fail := func(id string, text string) {
+		p.form.control(id).err = text
+		if first == "" {
+			first = id
 		}
 	}
-	return b.String()
-}
-
-// connectPageFields reads and validates the current host and port, leaving a
-// fail line in resultLines and returning ok false when either is invalid.
-func (p *connectPage) connectPageFields() (host string, port int, password string, ok bool) {
-	host = strings.TrimSpace(p.host)
-	if host == "" {
-		p.resultLines = []string{"[fail] Enter a host first."}
-		return "", 0, "", false
+	for _, id := range []string{connectHost, connectPort, connectPassword} {
+		p.form.control(id).err = ""
 	}
-	if err := domain.ValidateHost(host); err != nil {
-		p.resultLines = []string{"[fail] " + err.Error()}
-		return "", 0, "", false
+	host = strings.TrimSpace(p.value(connectHost))
+	switch {
+	case host == "":
+		fail(connectHost, "Enter a host first.")
+	default:
+		if err := domain.ValidateHost(host); err != nil {
+			fail(connectHost, err.Error())
+		}
 	}
-	port, err := validatePort(p.port)
+	port, err := validatePort(p.value(connectPort))
 	if err != nil {
-		p.resultLines = []string{"[fail] " + err.Error()}
+		fail(connectPort, err.Error())
+	}
+	password = p.value(connectPassword)
+	if err := validatePassword(password); err != nil {
+		fail(connectPassword, err.Error())
+	}
+	if first != "" {
+		p.form.focusID(first)
 		return "", 0, "", false
 	}
-	if err := validatePassword(p.password); err != nil {
-		p.resultLines = []string{"[fail] " + err.Error()}
-		return "", 0, "", false
-	}
-	return host, port, p.password, true
+	return host, port, password, true
 }
 
 func (p *connectPage) startTest() tea.Cmd {
+	p.resultLines = nil
 	host, port, password, ok := p.connectPageFields()
 	if !ok {
 		return nil
 	}
 	p.testing = true
 	p.spinnerFrame = 0
-	p.resultLines = nil
 	ctx := p.ctx
 	return tea.Batch(tui.Spinner(), func() tea.Msg {
 		res := testConnect(ctx, host, port, password)
@@ -279,13 +241,13 @@ func (p *connectPage) startTest() tea.Cmd {
 }
 
 func (p *connectPage) startSave() tea.Cmd {
+	p.resultLines = nil
 	host, port, password, ok := p.connectPageFields()
 	if !ok {
 		return nil
 	}
 	p.saving = true
 	p.spinnerFrame = 0
-	p.resultLines = nil
 	ctx := p.ctx
 	return tea.Batch(tui.Spinner(), func() tea.Msg {
 		return connectSaveDoneMsg{err: saveConnection(ctx, host, port, password)}
@@ -308,7 +270,7 @@ func (p *connectPage) startClear() tea.Cmd {
 func formatConnectTest(res connectResult, host string, port int) []string {
 	switch {
 	case res.PasswordRequired:
-		return []string{"That computer asks for a password. Enter it and test again."}
+		return []string{"[warn] That computer asks for a password. Enter it and test again."}
 	case res.NotListener:
 		return []string{notListenerLine(host, port)}
 	case res.Err != nil:
@@ -322,80 +284,70 @@ func formatConnectTest(res connectResult, host string, port int) []string {
 	}
 }
 
-// connectRowPrefix marks the focused field's row with "> " in place of the
-// usual two-space indent (as app_share.go's rowPrefix does).
-func (p *connectPage) connectRowPrefix(field int) string {
-	if p.focus == field {
-		return "> "
+// connectHelp is the help of the highlighted control.
+func (p *connectPage) connectHelp() string {
+	switch p.form.current().id {
+	case connectHost:
+		return "The IP address or host name of the computer that runs FreeCAD. That computer needs freecad-mcp with Share this PC turned on."
+	case connectPort:
+		return "The port that computer shares on; 9876 unless it was changed in Share this PC."
+	case connectPassword:
+		return "The password set in Share this PC on that computer. Leave it empty if none was set."
+	case connectTest:
+		return "Checks that the computer answers with these settings. Nothing is saved."
+	case connectClear:
+		return "Removes the saved host, port and password. Agents then use FreeCAD on this computer."
 	}
-	return "  "
+	return ""
 }
 
-// connectFieldDisplay is a field's display text: its value with a trailing
-// cursor mark while focused and non-empty, or the placeholder unchanged
-// while empty (focused or not), so the page starts out showing a plain
-// blank field rather than a stray cursor mark.
-func connectFieldDisplay(value, placeholder string, focused bool) string {
-	if value == "" {
-		return placeholder
+func (p *connectPage) footer() string {
+	width := p.size.width()
+	if p.confirmingClear {
+		return footerText(width, hint{"y", "remove"}, hint{"n", "keep"})
 	}
-	if focused {
-		return value + "_"
+	hints := []hint{{"tab", "move"}}
+	switch p.form.current().id {
+	case connectTest:
+		hints = append(hints, hint{"enter", "test"})
+	case connectClear:
+		hints = append(hints, hint{"enter", "remove"})
+	default:
+		hints = append(hints, hint{"enter", "save"})
 	}
-	return value
+	hints = append(hints, hint{"esc", "back"})
+	return footerText(width, hints...)
 }
 
 func (p *connectPage) View() string {
-	theme := tui.DefaultTheme
-	var b strings.Builder
-
-	b.WriteString("  Use FreeCAD that runs on another computer. That computer needs freecad-mcp with\n")
-	b.WriteString("  \"Share this PC\" turned on.\n\n")
-
-	hostText := connectFieldDisplay(p.host, strings.Repeat("_", 15), p.focus == connectFieldHost)
-	fmt.Fprintf(&b, "%s%-11s%s\n", p.connectRowPrefix(connectFieldHost), "Host:", hostText)
-
-	portText := connectFieldDisplay(p.port, strings.Repeat("_", 15), p.focus == connectFieldPort)
-	fmt.Fprintf(&b, "%s%-11s%s\n", p.connectRowPrefix(connectFieldPort), "Port:", portText)
-
-	passwordText := connectFieldDisplay(maskValue(p.password), strings.Repeat("_", 8), p.focus == connectFieldPassword)
-	fmt.Fprintf(&b, "%s%-11s%s  (only if that computer set one)\n",
-		p.connectRowPrefix(connectFieldPassword), "Password:", passwordText)
+	width := p.size.width()
+	body := paragraph("Use FreeCAD that runs on another computer.", width, nil)
+	body = append(body, "")
+	body = append(body, p.form.view(width)...)
 
 	switch {
 	case p.confirmingClear:
-		b.WriteString("\n  Use FreeCAD on this computer instead? The saved host, port and password are removed. (y/n)\n")
+		body = append(body, "")
+		body = append(body, paragraph("Use FreeCAD on this computer instead? The saved host, port and password are removed.", width, nil)...)
 	case p.testing:
-		where := p.host + ":" + p.port
-		if port, err := strconv.Atoi(p.port); err == nil {
-			where = hostPort(p.host, port)
+		where := p.value(connectHost) + ":" + p.value(connectPort)
+		if port, err := strconv.Atoi(p.value(connectPort)); err == nil {
+			where = hostPort(p.value(connectHost), port)
 		}
-		fmt.Fprintf(&b, "\n  %s Testing the connection to %s...\n", tui.SpinFrame(p.spinnerFrame), where)
+		body = append(body, "", "  "+tui.SpinFrame(p.spinnerFrame)+" Testing the connection to "+where+"...")
 	case p.saving:
-		fmt.Fprintf(&b, "\n  %s Saving...\n", tui.SpinFrame(p.spinnerFrame))
+		body = append(body, "", "  "+tui.SpinFrame(p.spinnerFrame)+" Saving...")
 	case p.clearing:
-		fmt.Fprintf(&b, "\n  %s Removing...\n", tui.SpinFrame(p.spinnerFrame))
+		body = append(body, "", "  "+tui.SpinFrame(p.spinnerFrame)+" Removing...")
 	case len(p.resultLines) > 0:
-		b.WriteString("\n")
+		body = append(body, "")
 		for _, l := range p.resultLines {
-			b.WriteString("  " + l + "\n")
+			body = append(body, p.p.resultLines(l, width)...)
 		}
 	}
-
-	if p.focus != connectFieldNone {
-		b.WriteString(tui.Footer(theme, tui.Hints(theme,
-			tui.Hint{Key: "tab", Label: "next field"},
-			tui.Hint{Key: "esc", Label: "stop editing"},
-		)))
-	} else if !p.confirmingClear {
-		b.WriteString(tui.Footer(theme, tui.Hints(theme,
-			tui.Hint{Key: "tab", Label: "edit fields"},
-			tui.Hint{Key: "t", Label: "test connection"},
-			tui.Hint{Key: "s", Label: "save"},
-			tui.Hint{Key: "d", Label: "use this computer instead"},
-			tui.Hint{Key: "esc", Label: "back"},
-		)))
+	if !p.confirmingClear {
+		body = append(body, "")
+		body = append(body, paragraph(p.connectHelp(), width, p.p.dim.Render)...)
 	}
-
-	return tui.Section(theme, "Connect to FreeCAD on another computer", b.String())
+	return renderScreen(p.p, p.size, headerText("Use another computer"), body, p.footer())
 }

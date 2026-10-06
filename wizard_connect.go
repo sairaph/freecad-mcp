@@ -12,8 +12,10 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 
+	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/sairaph/mcp-wizard/flow"
 	"github.com/sairaph/mcp-wizard/tui"
@@ -48,9 +50,16 @@ type connectState struct {
 	// The rest is connectHostStep's own view state; it does not survive
 	// past the wizard.
 	phase connectPhase
-	// portFocus is true while tab has moved focus to the Port field on the
-	// host screen; typing then goes there (digits only) instead of Host.
-	portFocus bool
+	// hostInput, portInput and passwordInput are the text fields; Host, Port
+	// and Password follow them. onPort is true while tab has moved the focus
+	// to the Port field on the host screen.
+	hostInput     textinput.Model
+	portInput     textinput.Model
+	passwordInput textinput.Model
+	onPort        bool
+	// hostErr is the inline error under the Host or Port field.
+	hostErr   string
+	errOnPort bool
 	testing   bool
 	// message is the current [ok]/[warn]/[fail] line(s) (joined by "\n"),
 	// or "" before the first test.
@@ -121,7 +130,12 @@ func (s *connectHostStep) Init(state *AppState) tea.Cmd {
 	}
 	c.phase = connectHostPhase
 	c.testing = false
-	c.portFocus = false
+	c.onPort = false
+	c.hostErr = ""
+	c.hostInput = shareInput("192.168.1.20 or a host name", false, c.Host)
+	c.portInput = shareInput(strconv.Itoa(domain.DefaultListenerPort), false, strconv.Itoa(c.Port))
+	c.portInput.Blur()
+	c.passwordInput = shareInput("only if that computer set one", true, c.Password)
 	return nil
 }
 
@@ -164,58 +178,62 @@ func (s *connectHostStep) updateHost(key string, m tea.KeyMsg, state *AppState) 
 		c.Password = ""
 		c.ready = false
 		c.message = ""
+		c.hostErr = ""
 		c.Chosen = false
 		return flow.Back, nil
-	case "tab":
-		c.portFocus = !c.portFocus
+	case "tab", "shift+tab":
+		c.onPort = !c.onPort
+		if c.onPort {
+			c.hostInput.Blur()
+			c.portInput.Focus()
+		} else {
+			c.portInput.Blur()
+			c.hostInput.Focus()
+		}
 		return flow.Continue, nil
 	case "enter":
 		if c.ready {
 			return flow.Next, nil
 		}
-		host := strings.TrimSpace(c.Host)
-		if host == "" {
+		c.Host = strings.TrimSpace(c.hostInput.Value())
+		if c.Host == "" {
+			c.hostErr, c.errOnPort = "Enter a host first.", false
 			return flow.Continue, nil
 		}
-		if err := domain.ValidateHost(host); err != nil {
-			c.message = "[fail] " + err.Error()
+		if err := domain.ValidateHost(c.Host); err != nil {
+			c.hostErr, c.errOnPort = err.Error(), false
 			return flow.Continue, nil
 		}
-		if err := validatePortValue(c.Port); err != nil {
-			c.message = "[fail] " + err.Error()
+		port, err := validatePort(c.portInput.Value())
+		if err != nil {
+			c.hostErr, c.errOnPort = err.Error(), true
 			return flow.Continue, nil
 		}
+		c.Port = port
+		c.hostErr = ""
 		c.testing = true
 		c.message = ""
 		return flow.Continue, tea.Batch(tui.Spinner(), testConnectCmd(s.ctx, c.Host, c.Port, ""))
-	case "backspace":
-		if c.portFocus {
-			c.Port /= 10
-		} else if c.Host != "" {
-			c.Host = trimLastRune(c.Host)
-		}
-		c.ready = false
-		c.message = ""
-	default:
-		if len(m.Runes) == 0 {
+	}
+	var cmd tea.Cmd
+	field := &c.hostInput
+	if c.onPort {
+		field = &c.portInput
+	}
+	if c.onPort {
+		var ok bool
+		if m, ok = digitsOnly(m); !ok {
 			return flow.Continue, nil
 		}
-		if c.portFocus {
-			for _, r := range m.Runes {
-				if r < '0' || r > '9' {
-					continue
-				}
-				if next := c.Port*10 + int(r-'0'); next <= 65535 {
-					c.Port = next
-				}
-			}
-		} else {
-			c.Host += string(m.Runes)
-		}
+	}
+	before := field.Value()
+	*field, cmd = field.Update(m)
+	if field.Value() != before {
 		c.ready = false
 		c.message = ""
+		c.hostErr = ""
 	}
-	return flow.Continue, nil
+	return flow.Continue, cmd
 }
 
 func (s *connectHostStep) updatePassword(key string, m tea.KeyMsg, state *AppState) (flow.Directive, tea.Cmd) {
@@ -225,12 +243,15 @@ func (s *connectHostStep) updatePassword(key string, m tea.KeyMsg, state *AppSta
 		// One screen back: the host screen, secrets cleared (pitfall).
 		c.phase = connectHostPhase
 		c.Password = ""
+		c.passwordInput.SetValue("")
 		c.message = ""
 		c.ready = false
+		return flow.Continue, nil
 	case "enter":
 		if c.ready {
 			return flow.Next, nil
 		}
+		c.Password = c.passwordInput.Value()
 		if err := validatePassword(c.Password); err != nil {
 			c.message = "[fail] " + err.Error()
 			return flow.Continue, nil
@@ -238,18 +259,16 @@ func (s *connectHostStep) updatePassword(key string, m tea.KeyMsg, state *AppSta
 		c.testing = true
 		c.message = ""
 		return flow.Continue, tea.Batch(tui.Spinner(), testConnectCmd(s.ctx, c.Host, c.Port, c.Password))
-	case "backspace":
-		c.Password = trimLastRune(c.Password)
+	}
+	var cmd tea.Cmd
+	before := c.passwordInput.Value()
+	c.passwordInput, cmd = c.passwordInput.Update(m)
+	if c.passwordInput.Value() != before {
+		c.Password = c.passwordInput.Value()
 		c.ready = false
 		c.message = ""
-	default:
-		if len(m.Runes) > 0 {
-			c.Password += string(m.Runes)
-			c.ready = false
-			c.message = ""
-		}
 	}
-	return flow.Continue, nil
+	return flow.Continue, cmd
 }
 
 // applyConnectResult classifies a testConnect result by the listener
@@ -355,34 +374,6 @@ func testConnectCmd(ctx context.Context, host string, port int, password string)
 	}
 }
 
-// trimLastRune drops the last rune of s, for backspace handling. It is the
-// one shared copy for package main; app_connect.go and wizard_share.go use
-// it too.
-func trimLastRune(s string) string {
-	r := []rune(s)
-	if len(r) == 0 {
-		return s
-	}
-	return string(r[:len(r)-1])
-}
-
-// hostFieldDisplay is the Host field's display text; focused adds the
-// trailing cursor mark (the Port field carries its own, so both are never
-// marked at once).
-func hostFieldDisplay(host string, focused bool) string {
-	if host == "" {
-		return strings.Repeat("_", 15)
-	}
-	if focused {
-		return host + "_"
-	}
-	return host
-}
-
-func maskedFieldDisplay(value string) string {
-	return maskValue(value) + "_"
-}
-
 func (s *connectHostStep) View(state *AppState) string {
 	theme := tui.DefaultTheme
 	c := &state.Connect
@@ -391,10 +382,10 @@ func (s *connectHostStep) View(state *AppState) string {
 	case c.testing:
 		fmt.Fprintf(&b, "  %s Testing the connection to %s...\n", tui.SpinFrame(state.Spinner.Frame), hostPort(c.Host, c.Port))
 	case c.phase == connectPasswordPhase:
-		fmt.Fprintf(&b, "  %s asks for a password: the one set in \"Share this PC\" on that computer.\n\n", c.Host)
-		fmt.Fprintf(&b, "  Password: %s\n", maskedFieldDisplay(c.Password))
+		b.WriteString(wizardParagraph(state, c.Host+" asks for a password: the one set in Share this PC on that computer.") + "\n")
+		b.WriteString("   Password  " + c.passwordInput.View() + "\n")
 		if c.message != "" {
-			b.WriteString("\n  " + c.message + "\n")
+			b.WriteString("\n" + wizardParagraph(state, c.message))
 		}
 		passwordEnterLabel := "test again"
 		if c.ready {
@@ -403,17 +394,20 @@ func (s *connectHostStep) View(state *AppState) string {
 		b.WriteString(tui.Footer(theme, tui.Hints(theme,
 			tui.Hint{Key: "enter", Label: passwordEnterLabel}, tui.Hint{Key: "esc", Label: "back"})))
 	default:
-		b.WriteString("  Enter the IP address or host name of the computer that runs FreeCAD. That computer\n" +
-			"  needs freecad-mcp installed with \"Share this PC\" turned on.\n\n")
-		portText := fmt.Sprintf("%d", c.Port)
-		if c.portFocus {
-			portText += "_"
+		b.WriteString(wizardParagraph(state, "Enter the IP address or host name of the computer that runs FreeCAD. That computer needs freecad-mcp installed with Share this PC turned on.") + "\n")
+		hostErr := func(onPort bool) {
+			if c.hostErr != "" && c.errOnPort == onPort {
+				b.WriteString(strings.Repeat(" ", 13) + newPalette().fail.Render(c.hostErr) + "\n")
+			}
 		}
-		fmt.Fprintf(&b, "  Host: %s     Port: %s\n", hostFieldDisplay(c.Host, !c.portFocus), portText)
+		b.WriteString("   Host      " + c.hostInput.View() + "\n")
+		hostErr(false)
+		b.WriteString("   Port      " + c.portInput.View() + "\n")
+		hostErr(true)
 		if c.message != "" {
 			b.WriteString("\n")
 			for _, line := range strings.Split(c.message, "\n") {
-				b.WriteString("  " + line + "\n")
+				b.WriteString(wizardParagraph(state, line))
 			}
 		}
 		enterLabel := "test connection"

@@ -121,6 +121,8 @@ type AppState struct {
 	Connect connectState
 	Share   shareState
 	Results installer.ResultsState
+	// Finish is the finish screen (wizard_finish.go).
+	Finish finishState
 	// UntickedClients names the clients left unticked because their entry
 	// was edited or runs another program; harnessDetecting is set while the
 	// client list is being detected (see harnessSelection).
@@ -323,25 +325,29 @@ func runAdd(ctx context.Context, cmd cli.Command) int {
 // (or FreeCAD on another computer), share this PC, register. machine adds the
 // per-machine steps (another computer, share this PC), which `add` leaves
 // out. Nothing is written before the registration step; the rest follows it
-// (see finishWizard).
+// in the finish step (see finishWizard).
 func runWizard(ctx context.Context, detector *harness.Detector, scope harness.Scope, cmd cli.Command, title string, machine bool) int {
+	// The library draws its screens' header from the theme.
+	tui.DefaultTheme.Copy.Title = title
 	state := &AppState{}
 	steps := []flow.Step[AppState]{
-		harnessSelection{
+		chrome{harnessSelection{
 			Step: installer.HarnessStep(ctx, detector, harnessState, installer.HarnessStepOptions{AllDetected: true, Scope: scope}),
 			name: serverName(cmd),
 			findUnticked: func(hs []harness.Harness) map[harness.ID]bool {
 				return untickedClients(clientEntries(ctx, detector, scope, hs))
 			},
-		},
-		newAddonStep(ctx),
+		}},
+		chrome{newAddonStep(ctx)},
 	}
 	if machine {
-		steps = append(steps, connectSteps(ctx)...)
-		steps = append(steps, shareSteps(ctx)...)
+		for _, s := range append(connectSteps(ctx), shareSteps(ctx)...) {
+			steps = append(steps, chrome{s})
+		}
 	}
 	steps = append(steps,
-		applyGuard{installer.ApplyStep(ctx, detector, harnessState, resultsState, installer.ApplyStepOptions{Scope: scope, DryRun: cmd.DryRun}), cmd.DryRun})
+		chrome{applyGuard{installer.ApplyStep(ctx, detector, harnessState, resultsState, installer.ApplyStepOptions{Scope: scope, DryRun: cmd.DryRun}), cmd.DryRun}},
+		newFinishStep(ctx, title, scope, cmd.DryRun))
 	applyIndex := stepIndex(steps, "apply")
 	f := flow.New(steps, state)
 	code := tui.Run(ctx, f, tui.Options{Title: title})
@@ -370,12 +376,9 @@ func runWizard(ctx context.Context, detector *harness.Detector, scope harness.Sc
 		}
 		return 1
 	}
-	if state.Failure != nil {
-		// Registration failed for some clients; the rest still get the addon.
-		fmt.Fprintln(os.Stderr, state.Failure)
-	}
-	code = finishWizard(ctx, os.Stdout, state, cmd.DryRun, code)
-	return max(code, installSkills(os.Stdout, scope, selectedIDs(state.Harness.Selected), cmd.DryRun, false))
+	// The finish screen showed what was done, including a registration that
+	// failed for some clients.
+	return max(code, state.Finish.Summary.Code)
 }
 
 func runUnattended(ctx context.Context, detector *harness.Detector, scope harness.Scope, credStore secret.Store, cmd cli.Command, desired harness.DesiredState) int {
@@ -555,6 +558,7 @@ func runLogin(ctx context.Context, cmd cli.Command) int {
 	state := &AppState{}
 	step := loginInput{installer.LoginStep(ctx, domain.LoginConfig(credStore), loginState)}
 	f := flow.New([]flow.Step[AppState]{step}, state)
+	tui.DefaultTheme.Copy.Title = "freecad-mcp login"
 	return tui.Run(ctx, f, tui.Options{Title: "freecad-mcp login"})
 }
 
@@ -575,24 +579,25 @@ func updateOptions() update.Options {
 	return opts
 }
 
-func newDoctor(ctx context.Context) *doctor.Runner {
+// doctorChecks are the checks of `doctor` and of the app's Doctor page.
+func doctorChecks() []doctor.Check {
 	opts := updateOptions()
-	r := doctor.New(
+	checks := []doctor.Check{
 		executableCheck{},
 		doctor.PathCheck{Dir: opts.InstallDir},
 		credentialsCheck{path: domain.CredentialPath()},
 		clientsCheck{},
-	)
-	r.Add(freecadChecks()...)
-	r.Add(remoteChecks()...)
-	if version != "dev" {
-		r.Add(doctor.UpdateCheck{Opts: opts})
 	}
-	return r
+	checks = append(checks, freecadChecks()...)
+	checks = append(checks, remoteChecks()...)
+	if version != "dev" {
+		checks = append(checks, doctor.UpdateCheck{Opts: opts})
+	}
+	return checks
 }
 
 func runDoctor(ctx context.Context) int {
-	return newDoctor(ctx).Run(ctx, os.Stdout)
+	return doctor.New(doctorChecks()...).Run(ctx, os.Stdout)
 }
 
 // credentialsCheck reports whether a FreeCAD password is stored. It is only
