@@ -150,6 +150,30 @@ def _is_sub_link(obj: FreeCAD.DocumentObject, prop: str) -> bool:
     return type_id.startswith(("App::PropertyLinkSub", "App::PropertyXLinkSub")) and "List" not in type_id
 
 
+#: TypeIds of the origin features and datums: a link to one of them as a whole
+#: needs the sub-element [""], not an empty one.
+_DATUM_TYPES = ("App::Line", "App::Plane", "App::Point", "PartDesign::Line", "PartDesign::Plane", "PartDesign::Point")
+
+
+def _whole_object_link(target: Any) -> Any:
+    """The value of a sub-element link to all of ``target``: ``(target, [""])``
+    for an origin feature or datum, else ``target`` with no sub-element."""
+    if getattr(target, "TypeId", "").startswith(_DATUM_TYPES):
+        return (target, [""])
+    return target
+
+
+def _is_whole_object(val: Any) -> bool:
+    """Whether ``val`` is ``["Name", ""]`` or ``["Name", [""]]``: a sub-element
+    link to the object itself, FreeCAD's own form for it."""
+    return (
+        isinstance(val, (list, tuple))
+        and len(val) == 2
+        and isinstance(val[0], str)
+        and (val[1] == "" or (isinstance(val[1], (list, tuple)) and list(val[1]) == [""]))
+    )
+
+
 def _link_kind(obj: FreeCAD.DocumentObject, prop: str) -> str:
     """"single" for a link property that takes one object, "list" for one that
     takes several, else "".
@@ -473,10 +497,30 @@ def set_object_property(
                             f"References must be a list; each entry is {_REFERENCE_FORMS}."
                         )
 
+                elif _is_sub_link(obj, prop) and isinstance(val, str):
+                    # A bare object name is the whole object: an origin feature
+                    # or datum is stored as (object, [""]), the form a pattern's
+                    # Direction "X_Axis" computes in; any other object as is.
+                    target = _link_object(doc, val)
+                    reject_app_link(target, prop)
+                    setattr(obj, prop, _whole_object_link(target))
+
                 elif _is_sub_link(obj, prop) and isinstance(val, (list, tuple, dict)):
                     # One sub-element link (a force's Direction): the forms
-                    # References takes for one sub-element.
-                    ref_name, subs = parse_reference_entry(val)
+                    # References takes for one sub-element, and ["Name", ""] or
+                    # ["Name", [""]] for the whole object, as a bare name.
+                    if _is_whole_object(val):
+                        target = _link_object(doc, val[0])
+                        reject_app_link(target, prop)
+                        setattr(obj, prop, _whole_object_link(target))
+                        continue
+                    try:
+                        ref_name, subs = parse_reference_entry(val)
+                    except ValueError as e:
+                        raise ValueError(
+                            f"{str(e).rstrip('.')}; or the bare object name for a whole object, "
+                            'such as an origin axis "X_Axis".'
+                        ) from None
                     target = _link_object(doc, ref_name)
                     reject_app_link(target, prop)
                     setattr(obj, prop, (target, [subs] if isinstance(subs, str) else subs))

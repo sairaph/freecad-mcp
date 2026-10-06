@@ -76,9 +76,11 @@ Applies to obj_properties in create_object and update_object.
 
 ## Draft profiles
 
-- Draft::Circle, Draft::Rectangle, Draft::Polygon and Draft::Wire are flat: a face (or edges), never a solid. The reply says so.
+- Draft::Circle, Draft::Rectangle, Draft::Polygon, Draft::Wire and Draft::ShapeString are flat: a face (or edges), never a solid. The reply says so.
 - Make the solid with Part::Extrusion: {"Base": "Polygon", "DirMode": "Normal", "LengthFwd": 5}. Use the name the Draft reply returns. The Extrusion hides the profile.
 - A Draft::Wire makes a solid only with Closed true; an open one extrudes to a shell.
+- Draft::OrthoArray {"Base": "Hole", "NumberX": 10, "IntervalX": 5}: a grid of copies of Base, one plain shape for a Part::Cut or Part::Fuse. NumberX, NumberY, NumberZ default to 1, an Interval is a spacing along its axis (default 10) or a vector. Draft::PolarArray {"Base": "Hole", "NumberPolar": 6, "Angle": 360} turns the copies about Z through Center; set Axis afterwards for another axis. The arrays are solids when Base is.
+- Draft::ShapeString makes text: read features.md Text.
 
 ## Colors
 

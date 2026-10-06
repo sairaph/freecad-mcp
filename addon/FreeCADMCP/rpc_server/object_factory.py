@@ -14,6 +14,7 @@ object after recompute and report the actual object name.
 """
 
 import math
+import os
 import re
 from typing import Any
 
@@ -178,6 +179,114 @@ def _make_draft_wire(doc, name, properties):
     return Draft.make_wire(points, closed=bool(properties.pop("Closed", False)))
 
 
+#: Where a default font is looked for when the Draft preference names none:
+#: bold sans first, so text prints with strokes that hold.
+_FONT_FALLBACKS = (
+    "C:/Windows/Fonts/arialbd.ttf",
+    "C:/Windows/Fonts/arial.ttf",
+    "/System/Library/Fonts/Supplemental/Arial Bold.ttf",
+    "/System/Library/Fonts/Supplemental/Arial.ttf",
+    "/Library/Fonts/Arial.ttf",
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+    "/usr/share/fonts/TTF/DejaVuSans-Bold.ttf",
+    "/usr/share/fonts/dejavu/DejaVuSans-Bold.ttf",
+)
+
+
+def _default_font() -> str | None:
+    """The font file for a ShapeString given none: the Draft preference
+    ``FontFile`` when it names an existing file, else the first of
+    ``_FONT_FALLBACKS`` that exists, else None."""
+    preferred = FreeCAD.ParamGet("User parameter:BaseApp/Preferences/Mod/Draft").GetString("FontFile", "")
+    if preferred and os.path.isfile(preferred):
+        return preferred
+    return next((path for path in _FONT_FALLBACKS if os.path.isfile(path)), None)
+
+
+def _number(value: Any, what: str, rule: str, valid=lambda v: True) -> Any:
+    """``value`` when it is a finite number (not a bool) that ``valid`` accepts,
+    else a ValueError saying it must be ``rule``."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or not valid(value):
+        raise ValueError(f"{what} must be {rule}, not {value!r}.")
+    return value
+
+
+def _count(value: Any, what: str) -> int:
+    return _number(value, what, "a whole number of 1 or more", lambda v: isinstance(v, int) and v >= 1)
+
+
+def _vector(raw: Any, what: str) -> Any:
+    """A FreeCAD.Vector from {"x", "y", "z"} or [x, y, z] (z may be left out)."""
+    if isinstance(raw, dict):
+        parts = [raw.get("x", 0), raw.get("y", 0), raw.get("z", 0)]
+    elif isinstance(raw, (list, tuple)) and len(raw) in (2, 3):
+        parts = (list(raw) + [0])[:3]
+    else:
+        raise ValueError(f"{what} must be {{'x': .., 'y': .., 'z': ..}} or [x, y, z], not {raw!r}.")
+    if any(isinstance(p, bool) or not isinstance(p, (int, float)) for p in parts):
+        raise ValueError(f"{what} must hold numbers, not {raw!r}.")
+    return FreeCAD.Vector(*parts)
+
+
+def _interval(raw: Any, axis: int, what: str) -> Any:
+    """The step of an array along one axis: a number is the spacing along that
+    axis, a vector is the step itself."""
+    if isinstance(raw, (int, float)) and not isinstance(raw, bool):
+        step = [0.0, 0.0, 0.0]
+        step[axis] = raw
+        return FreeCAD.Vector(*step)
+    return _vector(raw, what)
+
+
+def _array_base(doc: FreeCAD.Document, properties: dict, obj_type: str) -> Any:
+    name = _require(properties, "Base", obj_type)
+    base = doc.getObject(name) if isinstance(name, str) else None
+    if base is None:
+        raise ValueError(f"Referenced object '{name}' not found." if isinstance(name, str) else f"Base must be an object name, not {name!r}.")
+    return base
+
+
+def _make_draft_shapestring(doc, name, properties):
+    import Draft
+
+    text = _require(properties, "String", "Draft::ShapeString")
+    if not isinstance(text, str) or not text:
+        raise ValueError(f"String must be the non-empty text to draw, not {text!r}.")
+    size = _number(properties.pop("Size", 10), "Size", "a number above 0", lambda v: v > 0)
+    font = properties.pop("FontFile", None)
+    if font:
+        if not os.path.isfile(font):
+            raise ValueError(f"FontFile '{font}' does not exist on the computer running FreeCAD.")
+    else:
+        font = _default_font()
+        if font is None:
+            raise ValueError(
+                "Draft::ShapeString needs FontFile, the path of a .ttf or .otf font on the computer "
+                "running FreeCAD; no default font was found."
+            )
+    return Draft.make_shapestring(text, font, size)
+
+
+def _make_draft_ortho_array(doc, name, properties):
+    import Draft
+
+    base = _array_base(doc, properties, "Draft::OrthoArray")
+    counts = [_count(properties.pop(f"Number{axis}", 1), f"Number{axis}") for axis in "XYZ"]
+    steps = [_interval(properties.pop(f"Interval{axis}", 10), index, f"Interval{axis}") for index, axis in enumerate("XYZ")]
+    return Draft.make_ortho_array(base, steps[0], steps[1], steps[2], counts[0], counts[1], counts[2], use_link=False)
+
+
+def _make_draft_polar_array(doc, name, properties):
+    import Draft
+
+    base = _array_base(doc, properties, "Draft::PolarArray")
+    number = _count(_require(properties, "NumberPolar", "Draft::PolarArray"), "NumberPolar")
+    angle = _number(properties.pop("Angle", 360), "Angle", "a number of degrees")
+    center = _vector(properties.pop("Center", [0, 0, 0]), "Center")
+    return Draft.make_polar_array(base, number, angle, center, use_link=False)
+
+
 #: Types implemented in Python rather than C++, so absent from FreeCAD's type
 #: registry and rejected by ``doc.addObject``. Each entry adapts the real
 #: factory to a uniform ``(doc, name, properties) -> DocumentObject`` call.
@@ -190,7 +299,14 @@ _PYTHON_FACTORIES = {
     "Draft::Rectangle": _make_draft_rectangle,
     "Draft::Polygon": _make_draft_polygon,
     "Draft::Wire": _make_draft_wire,
+    "Draft::ShapeString": _make_draft_shapestring,
+    "Draft::OrthoArray": _make_draft_ortho_array,
+    "Draft::PolarArray": _make_draft_polar_array,
 }
+
+
+#: Draft types that are arrays of a solid, not flat profiles.
+_DRAFT_ARRAYS = ("Draft::OrthoArray", "Draft::PolarArray")
 
 
 def _create_python_object(doc: FreeCAD.Document, obj: Object):
@@ -260,15 +376,26 @@ def _create_generic_object(doc: FreeCAD.Document, obj: Object, plan: partdesign.
             f'{{"Base": "Pad", "Edges": ["Edge1", "Edge2"], "{partdesign.DRESSUPS[obj.type]}": 1}}; '
             "call list_subelements with kind edges to see the edge names."
         )
+    properties = plan.properties
     try:
-        # A feature goes in its Body the way FreeCAD's own commands put it
-        # there, which also sets BaseFeature and Tip.
-        res = plan.body.newObject(obj.type, obj.name) if plan.body is not None else doc.addObject(obj.type, obj.name)
+        if plan.body is not None and obj.type in partdesign.TRANSFORMED:
+            # A pattern joins its Body after its Originals are set: FreeCAD
+            # makes a Transformed feature the Tip only when it has them as it
+            # is added, and newObject adds it first.
+            res = doc.addObject(obj.type, obj.name)
+            if "Originals" in properties:
+                set_object_property(doc, res, {"Originals": properties["Originals"]})
+                properties = {key: value for key, value in properties.items() if key != "Originals"}
+            plan.body.addObject(res)
+        else:
+            # A feature goes in its Body the way FreeCAD's own commands put it
+            # there, which also sets BaseFeature and Tip.
+            res = plan.body.newObject(obj.type, obj.name) if plan.body is not None else doc.addObject(obj.type, obj.name)
     except Exception as e:
         if "not a document object type" in str(e):
             raise ValueError(_unregistered_type_message(obj.type)) from e
         raise
-    set_object_property(doc, res, plan.properties)
+    set_object_property(doc, res, properties)
     if plan.geometry is not None:
         partdesign.set_geometry(res, plan.geometry)
     FreeCAD.Console.PrintMessage(
@@ -534,8 +661,16 @@ def create_object_gui(doc_name: str, obj: Object):
             if _reading("the mesh type", lambda: is_gmsh(created), False):
                 extra.update(_reading("the mesh", lambda: {"mesh": mesh_info(created)}, {}))
             extra.update(_partdesign_fields(created, plan))
-            if obj.type.startswith("Draft::"):
+            if plan.body is not None:
+                tip = _reading("the Body's Tip", lambda: partdesign.tip_note(plan.body, created), None)
+                if tip:
+                    extra["notes"] = [*extra.get("notes", []), tip]
+            if obj.type.startswith("Draft::") and obj.type not in _DRAFT_ARRAYS:
                 extra["notes"] = [*extra.get("notes", []), f"{obj.type} is a flat profile: extrude it with Part::Extrusion to make a solid."]
+            if obj.type == "Draft::ShapeString":
+                font = _reading("the font", lambda: f"Font: {created.FontFile}", None)
+                if font:
+                    extra["notes"] = [*extra.get("notes", []), font]
             if not problem:
                 _reading("which sources to hide", lambda: hide_sources(created, None), None)
                 extra.update(_reading("the shape", lambda: _shape_fields(created), {}))

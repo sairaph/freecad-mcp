@@ -15,7 +15,7 @@ Design rules for FDM parts in PETG with a 0.4 mm nozzle. Sizes in mm. "Per side"
 - Rotating (a pin turning in a hole): 0.30 per side; 0.35 under side load. PETG on PETG grips.
 - Faces that face each other along z in a print-in-place joint (the ends of hinge knuckles): a gap of at least two layer heights (0.4 at 0.2 mm layers) as a starting point. Print a coupon first.
 - Press: aim for 0.1 to 0.2 interference on diameter at printed size, never more than 0.25. Model the hole at pin + 0.1 on diameter for a metal pin, at pin + 0.2 for a printed pin.
-- Clips work in PETG: it bends about 5 % before it yields. Gap 0.5 per side around a latch, beam at least 5 wide, root fillet at least half the beam thickness, and the beam bending in the xy plane, never across layers.
+- Clips work in PETG: design strain 2 % (1.2 % for a clip opened often, half for a beam printed upright). Gap 0.5 per side around a latch, beam at least 5 wide, root fillet at least half the beam thickness, and the beam bending in the xy plane, never across layers. Read features.md Snap fits.
 
 ## Threads
 
