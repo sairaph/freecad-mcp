@@ -10,6 +10,7 @@ Print each part in the pose it prints in. Lay every part flat on the plate with 
 
 - Move the top object of each part, the one check_printability lists (the last Cut or Fillet), not its inputs.
 - A lid or any part with recesses: put the face whose recesses would need bridges facing up, so countersinks and counterbores open upward.
+- A large pocket facing the plate (a washer pocket under a base) needs slicer supports or a different pose. Prefer the pose where it faces up, or split the part. A sacrificial layer only works for small bridges.
 - A part with a cosmetic face puts that face up, unless it is the flat one.
 - Set the pose with update_object on Placement, or in execute_code with the part's Placement.
 - A part is laid flat by rotating it about a horizontal axis by an angle that is not 0, then moving it so its lowest point is z 0.

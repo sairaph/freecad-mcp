@@ -288,7 +288,13 @@ overlap, a `Part::Cut` whose tool removes the base) the reply adds a warning,
 Placement.` The object stays and the call still succeeds. A `Part::Cut` whose result
 volume equals its base's (relative 1e-9, or 1e-6 mm^3) while the tool holds a
 solid warns `The tool does not reach the base: nothing was removed. Check
-their Placement.` Types whose result
+their Placement.` A volume that cannot be right for solid inputs warns too, since FreeCAD calls
+such a result valid: a `Part::Fuse` or `Part::MultiFuse` smaller than its largest input (`The
+result is smaller than its largest input: part of an input was dropped. Check the inputs touch
+properly, or fuse them one at a time.`, as when a thread fuses to nothing but itself), a
+`Part::Common` or `Part::MultiCommon` larger than its smallest input, a `Part::Cut` larger than its
+Base (relative tolerance 1e-3; box, cylinder, sphere, cone and torus pairs, nested, identical and
+touching, with refine on and off, never came near it). Types whose result
 is edges or faces by design (section, slice, cross sections, projection, 2D
 offset) give no warning.
 
@@ -1053,7 +1059,7 @@ EmptyCommon (no solid: its inputs do not overlap), NoCut (the tool does not
 reach the base)`. The same rules as in `create_object` apply (a `Part::Common`,
 `Part::Cut` and the other solid-making types with no solid although an input
 has one, and a `Part::Cut` whose result volume equals its base's although the
-tool holds a solid). With any of them the reply does not say "cleanly", and the
+tool holds a solid, and a fuse, common or cut whose volume cannot be right for its inputs, listed as e.g. `Bolt (smaller than its largest input: part of an input was dropped)`). With any of them the reply does not say "cleanly", and the
 frontmatter has `empty_count`. When no object needed a recompute (`recomputed:
 0`) the reply says so: `Document 'X': no object needed a recompute; 7
 object(s), none invalid.`

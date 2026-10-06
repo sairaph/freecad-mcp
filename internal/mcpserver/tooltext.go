@@ -241,7 +241,7 @@ FEM: create Fem::AnalysisPython first; pass analysis_name for its material, cons
 		Description: `Delete an object, even one others use. The reply lists the objects that failed because of it (a Part::Cut's Base or Tool) and those not rebuilt, which keep their old shape.`,
 	},
 	"recompute_document": {
-		Description: `Recompute a document and list every object that failed, with FreeCAD's message, every boolean whose result is empty or removed nothing, and the objects built on a failed one that were not rebuilt (they keep their old shape). Call it after a series of changes, after delete_object, or when a document needs a recompute. A failed fillet or chamfer says what to do, and a dependent says which failed object it waits for. Failures do not fail the call; fix them with update_object or delete_object.`,
+		Description: `Recompute a document and list every object that failed, with FreeCAD's message, every boolean whose result is empty, removed nothing or has a volume its inputs rule out, and the objects built on a failed one that were not rebuilt (they keep their old shape). Call it after a series of changes, after delete_object, or when a document needs a recompute. A failed fillet or chamfer says what to do, and a dependent says which failed object it waits for. Failures do not fail the call; fix them with update_object or delete_object.`,
 		Params:      map[string]string{"timeout": timeoutText(120)},
 	},
 	"undo": {

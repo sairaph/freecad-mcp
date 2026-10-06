@@ -15,10 +15,11 @@ Build each part of an assembly in its own App::Part, then move the Parts to asse
 
 - get_object, list_subelements, measure, check_printability and the Shape line of a reply are global: they count the Placement of every Part above the object. get_object adds LocalBoundBox when a Part moves the object.
 - The Placement property of an object stays its own, not the global one.
+- A hidden member of an App::Part does not count in the Part's shape, so its box, size and printability leave it out. Show it, or measure it by name.
 
 ## Clearances
 
-- measure with kind distance and the two Parts as refs (or one face of each) gives the smallest distance between them and the closest points. Compare it with the gap in the material file. It gives one distance for a pair: measure the pair of faces that matter.
+- measure with kind distance and the two Parts as refs (or one face of each) gives the smallest distance between them and the closest points. Compare it with the gap in the material file. It gives one minimum distance for a pair, so measure each pair of moving surfaces (a pin against its bore, a collar against its seat).
 - Faces that face each other along z need at least two layer heights. Read the material file.
 
 ## Print layout
