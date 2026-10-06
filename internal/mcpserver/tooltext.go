@@ -520,6 +520,7 @@ func addTool[In any](srv *mcp.Server, name string, schema *jsonschema.Schema,
 		panic(fmt.Sprintf("tool %q has no text", name))
 	}
 	describeSchema(name, schema, text.Params)
+	rememberArguments(name, schema)
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        name,
 		Title:       toolTitle(name),

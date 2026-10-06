@@ -883,7 +883,9 @@ The script runs on the machine hosting this MCP server, independently of
 `Part` yourself, open documents from disk (`FreeCAD.openDocument(path)`), and
 save results with `doc.save()`/`saveAs()` or `Shape.exportBrep()`. Nothing
 from the `execute_code` namespace is available. Print progress to stdout; it
-is returned when the process ends. After the script saves a `.FCStd` that is
+is returned when the process ends. Output is UTF-8, so text and paths with any
+character print and read back (on Windows `freecadcmd`'s own pipes use the
+ANSI code page, which made `print` of an arrow or an accented letter fail). After the script saves a `.FCStd` that is
 open in the GUI, call `reload_document` to show the result.
 
 A background run returns a `job_id` (`headless-` and eight hex digits) and the

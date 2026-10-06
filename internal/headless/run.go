@@ -116,9 +116,32 @@ func isNoise(line string) bool {
 	return false
 }
 
-// pyString renders s as a Python single-quoted string literal.
+// pyString renders s as a Python single-quoted string literal in ASCII only:
+// freecadcmd terminates ("Application unexpectedly terminated") when its -c
+// argument holds a non-ASCII character, so those are written as \u and \U
+// escapes.
 func pyString(s string) string {
-	return "'" + strings.NewReplacer(`\`, `\\`, `'`, `\'`, "\n", `\n`, "\r", `\r`).Replace(s) + "'"
+	var b strings.Builder
+	b.WriteByte('\'')
+	for _, r := range s {
+		switch {
+		case r == '\\' || r == '\'':
+			b.WriteByte('\\')
+			b.WriteRune(r)
+		case r == '\n':
+			b.WriteString(`\n`)
+		case r == '\r':
+			b.WriteString(`\r`)
+		case r < 0x80:
+			b.WriteRune(r)
+		case r <= 0xFFFF:
+			fmt.Fprintf(&b, `\u%04x`, r)
+		default:
+			fmt.Fprintf(&b, `\U%08x`, r)
+		}
+	}
+	b.WriteByte('\'')
+	return b.String()
 }
 
 func joinOutput(parts ...string) string {
@@ -135,12 +158,16 @@ func joinOutput(parts ...string) string {
 // __file__ set to its path, as a normal script runs. freecadcmd
 // drops what a script printed when the script raises, so a failure flushes the
 // output first, then prints the traceback (without this wrapper's own frame)
-// and exits 1.
+// and exits 1. Output goes out as UTF-8, which the reader decodes: on Windows
+// the pipes would otherwise use the ANSI code page (cp1252), and printing any
+// character outside it, such as an arrow or a CJK name, raised
+// UnicodeEncodeError.
 const bootstrapCode = `import sys as _sys, traceback as _traceback
-try:
-    _sys.stdout.reconfigure(line_buffering=True)
-except Exception:
-    pass
+for _stream in (_sys.stdout, _sys.stderr):
+    try:
+        _stream.reconfigure(encoding='utf-8', errors='replace', line_buffering=True)
+    except Exception:
+        pass
 _ns = {'__name__': '__main__', '__file__': SCRIPT, '__builtins__': __builtins__}
 try:
     with open(SCRIPT, encoding='utf-8-sig') as _f:

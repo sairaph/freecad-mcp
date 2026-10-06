@@ -73,9 +73,13 @@ one found. Restart your AI client to use a changed value.
 ## Failed tool calls
 
 Every failed tool call adds one line to `errors.log` in `~/.cache/freecad-mcp`:
-UTC time, session id, client label, tool, error code, message, hint and the
-call's arguments (each value cut to 200 characters; a token or password is
-never written). At 5 MB the file moves to `errors.log.1`, replacing the older
+UTC time, session id, client label, tool, error code, message, hint, the
+exception that ended a failed script (`cause`, the last line of its traceback cut
+to 300 characters, only when there is one) and the call's arguments (each value
+cut to 200 characters; a token or password is never written). Arguments a tool
+refused are logged as the agent received them. A background job that failed is
+logged once, when its status first shows it (`code=job_failed`), since the
+status call itself succeeds. At 5 MB the file moves to `errors.log.1`, replacing the older
 copy. `freecad-mcp errors` prints the most recent entries, 50 by default;
 `--last N` changes that.
 

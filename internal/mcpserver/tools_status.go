@@ -446,6 +446,8 @@ func lastKnownDocumentsBlock(docs []map[string]any, active string, age time.Dura
 func femFailureHint(res map[string]any, larger string) string {
 	e := str(res, "error")
 	switch {
+	case dialogBlocked(e):
+		return dialogBlockedHint
 	case strings.HasPrefix(e, "GUI dispatch timed out after"):
 		return "The analysis did not finish within its timeout. Call get_rpc_status to see whether it is still " +
 			"running on FreeCAD's GUI thread. " + larger
