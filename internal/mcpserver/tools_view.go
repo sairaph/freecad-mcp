@@ -112,7 +112,7 @@ func (s *Server) getView(ctx context.Context, _ *mcp.CallToolRequest, in getView
 	if shot.Document != "" {
 		body += " of " + shot.Document
 	}
-	body += "."
+	body += "." + imageSizeText(img.(*mcp.ImageContent).Data)
 	out := render.SuccessResult(getViewFront{Document: shot.Document, View: viewName}, body)
 	budget := imageBudget(out)
 	if size := len(img.(*mcp.ImageContent).Data); size > budget {

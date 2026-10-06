@@ -143,3 +143,20 @@ def test_focus_on_a_feature_of_a_body_the_call_hides_is_not_drawn(view_mode) -> 
     s = build()
     assert focus_visible(view_mode, s, s.pad, [])
     assert not focus_visible(view_mode, s, s.pad, [], hide=["Body"])
+
+
+def test_a_stop_by_the_user_is_reported_once_and_a_stop_by_a_call_is_not(view_mode) -> None:
+    class Engine:
+        kind = "orbit"
+        timer = types.SimpleNamespace(stop=lambda: None, deleteLater=lambda: None)
+
+    view_mode._engines["Doc"] = Engine()
+    assert view_mode.running_kind("Doc") == "orbit"
+    view_mode.stop_mode("Doc", "user")
+    assert view_mode.running_kind("Doc") is None
+    assert view_mode.earlier_stop("Doc") == ("user", "orbit")
+    view_mode.clear_stop("Doc")
+    assert view_mode.earlier_stop("Doc") is None
+    view_mode._engines["Doc"] = Engine()
+    view_mode.stop_mode("Doc", "replaced")
+    assert view_mode.earlier_stop("Doc") is None

@@ -123,7 +123,7 @@ func (s *Server) createObject(ctx context.Context, req *mcp.CallToolRequest, in 
 	name := str(res, "object_name")
 	txName, txMerged := transactionFields(res)
 	out := render.SuccessResult(objectFront{Document: in.DocName, Object: name, Type: in.ObjType, Transaction: txName},
-		loadNote(quantityNote(placementNote(transactionNote(fmt.Sprintf("Object '%s' created successfully.", name), txName, txMerged), res), res), res))
+		loadNote(quantityNote(featureNote(placementNote(transactionNote(fmt.Sprintf("Object '%s' created successfully.", name), txName, txMerged), res), res), res), res))
 	return s.withNotice(s.screenshot(ctx, conn, out, in.IncludeScreenshot, viewString(in.ViewName), in.DocName)), nil, nil
 }
 
@@ -147,7 +147,7 @@ func (s *Server) updateObject(ctx context.Context, req *mcp.CallToolRequest, in 
 	name := str(res, "object_name")
 	txName, txMerged := transactionFields(res)
 	out := render.SuccessResult(objectFront{Document: in.DocName, Object: name, Transaction: txName},
-		loadNote(quantityNote(placementNote(transactionNote(fmt.Sprintf("Object '%s' updated successfully.", name), txName, txMerged), res), res), res))
+		loadNote(quantityNote(featureNote(placementNote(transactionNote(fmt.Sprintf("Object '%s' updated successfully.", name), txName, txMerged), res), res), res), res))
 	return s.withNotice(s.screenshot(ctx, conn, out, in.IncludeScreenshot, viewString(in.ViewName), in.DocName)), nil, nil
 }
 

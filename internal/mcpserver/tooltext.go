@@ -210,11 +210,11 @@ var toolTexts = map[string]toolText{
 		Params:      map[string]string{"include_screenshot": noScreenshotText},
 	},
 	"list_subelements": {
-		Description: `List the faces and edges of an object so you can pick sub-elements for measure and FEM References. Per face: name (Face1), surface type (plane, cylinder, cone, sphere, torus, other), area, centre, and normal (planes) or radius and axis (cylinders, spheres). Per edge: name (Edge1), curve type (line, circle, other), length, start and end points, along x, y or z for a line parallel to an axis (else its direction), and radius and centre (circles). Coordinates are global, in mm. Call it instead of guessing face numbers. Read-only.`,
+		Description: `List the faces and edges of an object so you can pick sub-elements for measure and FEM References. Per face: name (Face1), surface type (plane, cylinder, cone, sphere, torus, other), area, centre, and normal (planes) or radius and axis (cylinders, spheres). Per edge: name (Edge1), curve type (line, circle, other), length, start and end points, along x, y or z for a line parallel to an axis (else its direction), and radius and centre (circles). A face or edge lying wholly at the shape's lowest z says "on the bottom"; an edge with no length says "degenerate": never pick it. Coordinates are global, in mm. Call it instead of guessing face numbers. Read-only.`,
 		Params:      map[string]string{"kind": "which sub-elements to list (default faces)"},
 	},
 	"create_object": {
-		Description: `Create one object in a document. Use the object name the reply returns: FreeCAD may rename (Box001). The reply lists each quantity it set with its unit. An error before the object exists creates nothing; an object created but not computing stays, named in the reply: fix it with update_object or delete_object.
+		Description: `Create one object in a document. Use the object name the reply returns: FreeCAD may rename (Box001). The reply lists each quantity set with its unit, the edges of a fillet or chamfer, and the source hidden: Fillet, Chamfer, Extrusion, Revolution and Thickness hide theirs, as FreeCAD does. An error before the object exists creates nothing; an object created but not computing stays, named in the reply: fix it with update_object or delete_object.
 FEM: create Fem::AnalysisPython first; pass analysis_name for its material, constraints and mesh; then call run_fem_analysis. Fem::MaterialCommon takes Material as {"Name": "Steel", "YoungsModulus": "210 GPa", "PoissonRatio": 0.3, "Density": "7900 kg/m^3"}. Fem::FemMeshGmsh takes Shape (the solid's name) and CharacteristicLengthMax/Min in mm, and is meshed on creation. A Fem::ConstraintForce acts along the outward normal of its face and a Fem::ConstraintPressure into it; Reversed true flips either, and the reply states the direction.`,
 		Params: map[string]string{
 			"obj_type":       `FreeCAD type, such as Part::Box, Part::Cylinder, Part::Cut, PartDesign::Body, Spreadsheet::Sheet, Fem::AnalysisPython, Fem::ConstraintFixed. Of the Python-only types only these work: Part::Tube (needs InnerRadius, OuterRadius, Height), Draft::Circle (Radius), Draft::Rectangle (Length, Height), Draft::Polygon (FacesNumber, Radius), Draft::Wire (Points, optional Closed); build others with execute_code`,
@@ -224,7 +224,7 @@ FEM: create Fem::AnalysisPython first; pass analysis_name for its material, cons
 		},
 	},
 	"update_object": {
-		Description: `Set properties of an existing object: dimensions, Placement, links, expressions, colors. obj_properties follows the same rules as in create_object. The reply lists each quantity it set with its unit; check the rest with get_object.`,
+		Description: `Set properties of an existing object: dimensions, Placement, links, expressions, colors. obj_properties follows the same rules as in create_object. The reply lists each quantity it set with its unit, and the edges now of a fillet or chamfer; check the rest with get_object.`,
 		Params:      map[string]string{"obj_properties": objPropsText},
 	},
 	"delete_object": {
@@ -279,7 +279,7 @@ FEM: create Fem::AnalysisPython first; pass analysis_name for its material, cons
 		Params: map[string]string{
 			"doc_name":              "document whose 3D view to change (default: the active document); its tab is brought to the front",
 			"view_name":             "orientation to set (default: keep the current one)",
-			"focus":                 "object names to frame (default: everything visible)",
+			"focus":                 "object names to frame; other visible objects stay visible, use isolate to show only these (default: everything visible)",
 			"show":                  "object names to make visible",
 			"hide":                  "object names to hide",
 			"isolate":               "object names to show while hiding every other visible object with a shape",
@@ -420,7 +420,7 @@ FEM: create Fem::AnalysisPython first; pass analysis_name for its material, cons
         obj.Shape = fused
         doc.recompute()
     commit(apply)
-Scripts share one namespace across calls. Fuse many additions together first, then apply one boolean to the heavy shape. File paths, path included, are on the computer running FreeCAD.`,
+Scripts share one namespace across calls. get_async_status gives state, error and traceback, not printed output: read results with execute_code. Fuse many additions first, then apply one boolean to the heavy shape. File paths, path included, are on the computer running FreeCAD.`,
 		Params: map[string]string{
 			"code": "background-safe Python; send every document or view write through commit(fn). Pass exactly one of code and path",
 			"path": pathText,

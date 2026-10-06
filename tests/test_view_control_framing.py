@@ -22,6 +22,8 @@ class RecordingViewMode(types.SimpleNamespace):
             DEFAULT_DWELL_SECONDS=2.0,
             import_coin=lambda: None,
             clear_stop=lambda _name: None,
+            running_kind=lambda _name: None,
+            earlier_stop=lambda _name: None,
             stop_mode=lambda _name, _reason="": None,
             check_visual_changes=lambda *_args: ({}, None),
             apply_visual_changes=lambda *_args: {"shown": [], "hidden": [], "transparency": {}, "display_mode": {}},
@@ -98,3 +100,34 @@ def test_only_an_orbit_frames_the_sphere(view_control, mode: str, focus: list[st
     reply = module._set_view_gui(None, options)
     assert reply["success"] is True, reply
     assert view_mode.fits == [mode == "orbit"]
+
+
+def test_a_call_that_stops_a_mode_says_which_and_an_earlier_stop_is_passed_on(view_control) -> None:
+    module, view_mode = view_control
+    view_mode.running_kind = lambda _name: "orbit"
+    reply = module._set_view_gui(None, {})
+    assert (reply["stopped"], reply["stopped_mode"]) == ("replaced", "orbit")
+    view_mode.reset = lambda _doc: {}
+    reply = module._set_view_gui(None, {"reset": True})
+    assert (reply["stopped"], reply["stopped_mode"]) == ("reset", "orbit")
+    view_mode.running_kind = lambda _name: None
+    view_mode.earlier_stop = lambda _name: ("user", "tour")
+    reply = module._set_view_gui(None, {})
+    assert (reply["stopped"], reply["stopped_mode"]) == ("user", "tour")
+    view_mode.earlier_stop = lambda _name: None
+    assert "stopped" not in module._set_view_gui(None, {})
+
+
+def test_a_failure_after_the_mode_stopped_still_reports_the_stop(view_control) -> None:
+    module, view_mode = view_control
+    view_mode.fit_pose = lambda *_args, **_kwargs: None
+    options = {"focus": ["Box"]}
+    view_mode.running_kind = lambda _name: "orbit"
+    reply = module._set_view_gui(None, options)
+    assert reply["success"] is False
+    assert (reply["stopped"], reply["stopped_mode"]) == ("replaced", "orbit")
+    view_mode.running_kind = lambda _name: None
+    view_mode.earlier_stop = lambda _name: ("user", "tour")
+    reply = module._set_view_gui(None, options)
+    assert reply["success"] is False
+    assert (reply["stopped"], reply["stopped_mode"]) == ("user", "tour")

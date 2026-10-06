@@ -267,6 +267,24 @@ def fillet_edge_entries(obj: FreeCAD.DocumentObject, val: Any, default: Any) -> 
     return out
 
 
+def fillet_edges_text(obj: FreeCAD.DocumentObject, names: Any) -> list[str]:
+    """The edges of a Part::Fillet or Part::Chamfer as they are now, for example
+    ``["Edge1 r4", "Edge3 r2 to r4"]`` (``s`` for a chamfer), when ``names`` (the
+    properties just set) holds the Edges or the Radius or Size; else ``[]``."""
+    if not _has_fillet_edges(obj) or not {"Edges", "Radius", "Size"} & set(names):
+        return []
+    letter = "s" if obj.TypeId == "Part::Chamfer" else "r"
+
+    def number(value: float) -> str:
+        return f"{value:.4f}".rstrip("0").rstrip(".")
+
+    out = []
+    for edge, first, second in obj.Edges:
+        size = number(first) if abs(first - second) < 1e-9 else f"{number(first)} to {letter}{number(second)}"
+        out.append(f"Edge{edge} {letter}{size}")
+    return out
+
+
 def _take_fillet_edges(obj: FreeCAD.DocumentObject, properties: dict[str, Any]):
     """Split the Edges of a Part::Fillet or Part::Chamfer, and the Radius or Size
     that goes with it, out of ``properties``; ``(rest, edges value, default)``.

@@ -258,13 +258,15 @@ def serialize_view_object(view):
 
 
 def _names(obj, attr: str) -> list[str]:
-    """The Name of every object in obj.OutList / obj.InList."""
+    """The Name of every object in obj.OutList / obj.InList, each once in the
+    order FreeCAD gives (it lists an object once per link, so a fillet whose Base
+    and Edges both link the box names the box twice)."""
     try:
         items = getattr(obj, attr)
     except Exception:
         return []
     try:
-        return [str(item.Name) for item in items]
+        return list(dict.fromkeys(str(item.Name) for item in items))
     except Exception:
         return []
 

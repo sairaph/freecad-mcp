@@ -211,6 +211,16 @@ def _set_view_gui(doc_name: str | None, options: dict[str, Any]) -> dict[str, An
     reply: dict[str, Any] = {"success": True, "document": doc.Name}
     gui_doc = FreeCADGui.getDocument(doc.Name)
     was_modified = bool(gui_doc.Modified)
+    ran = view_mode.running_kind(doc.Name)
+    earlier = view_mode.earlier_stop(doc.Name)
+    # What this call tells about a mode that stopped. Set before the old reason
+    # is cleared and carried on a failure after that point too: the mode is
+    # gone either way, and the report must not be lost with it.
+    stopped: dict[str, Any] = {}
+    if ran:
+        stopped = {"stopped": "reset" if options.get("reset") else "replaced", "stopped_mode": ran}
+    elif earlier:
+        stopped = {"stopped": earlier[0], "stopped_mode": earlier[1]}
     view_mode.clear_stop(doc.Name)
     animated = view.isAnimationEnabled()
     # The navigation animation is off from the first orientation change to the
@@ -244,11 +254,14 @@ def _set_view_gui(doc_name: str | None, options: dict[str, Any]) -> dict[str, An
         if focus_objects:
             pose = view_mode.fit_pose(view, focus_objects, sphere=mode == "orbit")
             if pose is None:
-                return fail(
-                    INVALID_INPUT,
-                    "None of the focus objects has a shape on screen to frame.",
-                    "Make them visible with show, or name other objects.",
-                )
+                return {
+                    **fail(
+                        INVALID_INPUT,
+                        "None of the focus objects has a shape on screen to frame.",
+                        "Make them visible with show, or name other objects.",
+                    ),
+                    **stopped,
+                }
             view_mode.apply_pose(view, pose)
         else:
             # Everything drawn once this call's show, hide and isolate are
@@ -273,6 +286,7 @@ def _set_view_gui(doc_name: str | None, options: dict[str, Any]) -> dict[str, An
         gui_doc.Modified = was_modified
 
     reply.update(view_mode.status(doc.Name))
+    reply.update(stopped)
     reply["mode"] = mode
     pose = view_mode.read_pose(view)
     reply["camera"] = {
@@ -292,7 +306,7 @@ def set_view(doc_name: str | None = None, options: dict[str, Any] | None = None)
     of object name to value), ``mode``, ``degrees_per_second`` (orbit),
     ``stops`` (tour: ``{"focus", "dwell_seconds", "view_name"?}``),
     ``move_seconds`` and ``loop`` (tour), ``reset``. Reply: ``{"success",
-    "document", "mode", "running", "stopped"?, "camera", "shown"?, "hidden"?,
+    "document", "mode", "running", "stopped"?, "stopped_mode"?, "camera", "shown"?, "hidden"?,
     "transparency"?, "display_mode"?, "reset"?}``. GUI thread, 60 s. No
     transaction.
     """

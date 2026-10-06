@@ -130,8 +130,12 @@ func (s *Server) setView(ctx context.Context, _ *mcp.CallToolRequest, in setView
 		return s.withNotice(failure(ctx, "set view", err, "")), nil, nil
 	}
 	if !succeeded(res) {
-		return s.withNotice(reportedCode("set view", res,
-			"Call list_documents with {} to see the open documents, and list_objects for the object names.")), nil, nil
+		out := reportedCode("set view", res,
+			"Call list_documents with {} to see the open documents, and list_objects for the object names.")
+		if line := stoppedModeText(str(res, "stopped"), str(res, "stopped_mode")); line != "" {
+			out.Content = append(out.Content, &mcp.TextContent{Text: line})
+		}
+		return s.withNotice(out), nil, nil
 	}
 
 	mode := str(res, "mode")
@@ -153,6 +157,9 @@ func (s *Server) setView(ctx context.Context, _ *mcp.CallToolRequest, in setView
 	}
 	if running {
 		body.WriteString(" get_view pauses the mode for its capture and resumes it.")
+	}
+	if line := stoppedModeText(str(res, "stopped"), str(res, "stopped_mode")); line != "" {
+		body.WriteString("\n\n" + line)
 	}
 	for _, line := range []struct{ key, label string }{{"shown", "Shown"}, {"hidden", "Hidden"}} {
 		if names := stringItems(res[line.key]); len(names) > 0 {
@@ -192,4 +199,29 @@ func mapText(m map[string]any, suffix string) string {
 		parts = append(parts, k+" "+formatNumber(m[k])+suffix)
 	}
 	return strings.Join(parts, ", ")
+}
+
+// stoppedModeText says what became of a mode that was running: this call
+// stopped it, or it had stopped on its own since the last call.
+func stoppedModeText(reason, kind string) string {
+	if kind == "" {
+		kind = "mode"
+	}
+	switch reason {
+	case "":
+		return ""
+	case "replaced":
+		return "Stopped the running " + kind + "."
+	case "reset":
+		return "Stopped the running " + kind + " (reset)."
+	case "user":
+		return "The " + kind + " had stopped: the user moved the view."
+	case "finished":
+		return "The " + kind + " had finished."
+	case "document_closed":
+		return "The " + kind + " had stopped: the document or its view was closed."
+	case "error":
+		return "The " + kind + " had stopped after an error in FreeCAD."
+	}
+	return "The " + kind + " had stopped."
 }

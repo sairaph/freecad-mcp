@@ -169,3 +169,10 @@ def test_serialize_object_survives_broken_shape():
     result = serialize.serialize_object(obj)
     assert result["Name"] == "Pad"
     assert "error" in result["Shape"]
+
+
+def test_out_and_in_lists_name_each_object_once_in_order():
+    twice = types.SimpleNamespace(Name="Outer")
+    obj = types.SimpleNamespace(OutList=[twice, types.SimpleNamespace(Name="Tool"), twice], InList=[])
+    assert serialize._names(obj, "OutList") == ["Outer", "Tool"]
+    assert serialize._names(obj, "InList") == []

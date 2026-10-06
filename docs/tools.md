@@ -208,6 +208,18 @@ and `list_subelements`. The size is a number: FreeCAD ignores an expression
 bound to an edge size, so one is refused. A Name FreeCAD sanitises (a space
 becomes an underscore) keeps the Label as asked, and the reply gives both;
 `create_object` and `update_object` also echo a `Placement` they set.
+The reply of a fillet or chamfer call lists its edges as they are now
+(`Edges now: Edge1 r4, Edge3 r2 to r4.`, `s` for a chamfer) when `Edges`,
+`Radius` or `Size` was set.
+
+`Part::Fillet`, `Part::Chamfer`, `Part::Extrusion`, `Part::Revolution` and
+`Part::Thickness` hide their source object, as FreeCAD's own commands do, so
+the source does not cover the result; the reply names it (`Hidden: Outer (the
+source of Round, as FreeCAD's own command does).`). Only a source that was
+visible is hidden, nothing is hidden for a failed or invalid object, and
+`update_object` hides the source only when it sets the link again (`Base`,
+`Source` or `Faces`). Mirroring, offsets, lofts and sweeps leave their source
+shown; booleans and compounds hide theirs themselves.
 
 Any other Python-implemented type must be built with `execute_code` instead.
 The Draft factories name objects themselves, so for those the returned object
@@ -288,7 +300,9 @@ Set properties of an existing object, in the same form `create_object` takes
 
 Use it when `create_object` cannot set a property at creation time, then
 verify the result with `get_object`. The reply lists the quantity properties
-the call set with their resulting values and units.
+the call set with their resulting values and units. A fillet or chamfer reply
+lists its edges, and the reply names a source object it hid, as for
+`create_object`.
 
 ### `delete_object`
 
@@ -330,7 +344,9 @@ Use it to check the values `update_object` or `create_object` set, or to see
 which properties an object has before updating it. Its `Shape` block gives
 the volume, area, vertex, edge, face and solid counts (`SolidCount`, so a fused
 result shown as one Compound of two solids is clear), the bounding box and the
-centre of mass; quantities are in FreeCAD's preferred units. A missing object
+centre of mass; quantities are in FreeCAD's preferred units. `OutList` and
+`InList` name each linked object once, in FreeCAD's order, even when it is
+linked twice (a fillet's `Base` and `Edges`). A missing object
 is a not-found error naming `list_objects` and `list_documents` as next steps.
 
 ## Measurement and selection
@@ -394,7 +410,10 @@ plus the normal of a plane and the radius and axis of a cylinder or sphere.
 Each edge row gives its name (`Edge1`), curve type (`line`, `circle` or
 `other`) and length, its start and end points, `along x`, `along y` or `along z` for a
 line parallel to an axis (otherwise its direction), plus the radius and centre
-of a circle. Use it to find vertical, horizontal, top and bottom edges, and the
+of a circle. A face or edge that lies wholly at the shape's lowest z says `on
+the bottom` (the edges that sit on the print plate), and an edge with no
+length, such as the pole of a rounded corner, says `degenerate`: never pick
+it. Use it to find vertical, horizontal, top and bottom edges, and the
 face to pass to `measure` as a `sub`, or to a `References` entry such as a FEM
 constraint's. An object with no shape, or an unknown object or document, is an
 error.
@@ -657,7 +676,9 @@ For each part, the reply gives its object name (and its label when that
 differs), its size (tight bounding box), its free margin to the plate edges
 (the distance from the nearest side of its box to a plate edge in x and y, and
 to the build height when `bed_z` is given; the side that sits on the plate is
-not counted; a sign shows only when the part is outside), and which parts it
+not counted; a sign shows only when the part is outside) followed by the
+margin to each side, `(x 10 / 186, y 10 / 206)`, with `z max N` added when
+`bed_z` is given, and which parts it
 overlaps. Space the parts apart before calling it: overlapping complex parts,
 such as threads, make the intersection slow. Overlap of two solids is the volume
 of their solid intersection, so a part sitting in another part's cavity
@@ -801,7 +822,8 @@ lost.
 
 A script that raises returns the exception and its traceback (the last eight
 frames, with line numbers; `<string>, line N` for inline code), so a fix does
-not need FreeCAD's Report View.
+not need FreeCAD's Report View. What the script printed before it raised comes
+back too, in an `Output before the error:` block above the traceback.
 
 ### `execute_code_async`
 
@@ -825,6 +847,10 @@ helper, which queues `fn` on the GUI thread, waits for it, and raises
 long-running OCCT geometry or other CPU-bound work that would exceed
 `execute_code`'s budget.
 
+The job's result is only its state, error and traceback: printed output is not
+returned, so keep results in variables of the shared namespace and read them
+with `execute_code`.
+
 ### `get_async_status`
 
 Report the state of background jobs started by `execute_code_async` and by
@@ -834,8 +860,8 @@ Report the state of background jobs started by `execute_code_async` and by
   jobs and up to 20 recently finished ones, plus the headless jobs.
 
 For an `execute_code_async` job it reports whether the job is running, done or
-failed, with the error and traceback of a failed job; history is held in
-memory until FreeCAD exits. For a headless job (its id starts with
+failed, with the error and traceback of a failed job, and never its printed
+output; history is held in memory until FreeCAD exits. For a headless job (its id starts with
 `headless-`) it reports `running`, `finished` or `cancelled`, the exit code,
 the elapsed seconds and the last 200 lines of output; see
 `execute_code_headless`. It does not use the GUI thread, so it answers even
@@ -953,6 +979,12 @@ gets no unsaved-changes mark.
 An orbit or tour runs on FreeCAD's GUI thread until the user moves the view,
 the next `set_view`, `reset` or the document closing. `get_view` pauses it for
 the capture and resumes it. The reply states the camera and any running mode.
+A call that stops a running orbit or tour says so (`Stopped the running
+orbit.`, `(reset)` after it with `reset`), also when it starts a new mode; a mode
+that stopped on its own since the last call is reported once (`The orbit had
+stopped: the user moved the view.`, `The tour had finished.`). A call that
+stopped a mode and then fails, for example because none of the `focus` objects
+has a shape on screen, carries the same line under the error.
 An orbit frames the sphere around the objects it shows (half their bounding box
 diagonal as radius), so the whole model stays in view from every angle; a static
 view and a tour frame the box itself.
@@ -984,7 +1016,7 @@ ratio when the longest edge exceeds 1024 pixels; with only one given, the
 other follows the viewport's aspect ratio, so the picture is the scene scaled,
 never a crop of it. A reply carries at most 1
 MiB, so an image too large to fit is refused with a hint to ask for a smaller
-one.
+one. The reply states the size of the image (`Image: 800 x 281 px.`).
 
 Fails when no document is open, `doc_name` is not an open document, that
 document has no 3D view (opened hidden, or all its 3D views closed), or,
