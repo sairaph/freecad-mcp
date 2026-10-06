@@ -424,6 +424,11 @@ def mesh_to_solid(
             if container is not None:
                 new_obj.Placement = container
             doc.recompute()
+            try:
+                # The source mesh stays as it was: still shown, it prints and exports with the solid.
+                source_visible = bool(obj.ViewObject.Visibility)
+            except Exception:
+                source_visible = False
 
             reply = {
                 "success": True,
@@ -431,6 +436,7 @@ def mesh_to_solid(
                 "object": obj.Name,
                 "created_object": {"name": new_obj.Name, "label": new_obj.Label, "type": new_obj.TypeId},
                 "is_solid": is_solid,
+                "source_visible": source_visible,
                 "faces": serialize_int(len(result_shape.Faces)),
                 "volume": finite_or_none(result_shape.Volume) if is_solid else None,
                 "refined": refined,

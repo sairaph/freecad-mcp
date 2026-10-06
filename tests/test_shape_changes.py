@@ -117,3 +117,14 @@ def test_a_null_or_unreadable_shape_is_not_a_signature_and_a_failure_reports_not
     sc.tree_root_objects = lambda _d: (_ for _ in ()).throw(RuntimeError("tree"))
     doc = doc_of(Obj("A", 1))
     assert sc.changed_shapes(doc, {"A": 0}) == {}
+
+
+def test_excluded_objects_are_left_out_of_the_report(sc) -> None:
+    own, body = Obj("Pad", 1), Obj("Body", 2)
+    doc = doc_of(own, body)
+    sc.tess.roots = {"Pad", "Body"}
+    before = sc.snapshot(doc)
+    own.Shape, body.Shape = Shape(10), Shape(20)
+    found = sc.changed_shapes(doc, before, {"Pad"})
+    assert [r["name"] for r in found["changed_shapes"]] == ["Body"] and found["changed_shapes_count"] == 1
+    assert sc.changed_shapes(doc, before, {"Pad", "Body"}) == {}

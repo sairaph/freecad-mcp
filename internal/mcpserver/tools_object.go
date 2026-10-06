@@ -135,7 +135,7 @@ func (s *Server) createObject(ctx context.Context, req *mcp.CallToolRequest, in 
 	txName, txMerged := transactionFields(res)
 	out := render.SuccessResult(objectFront{Document: in.DocName, Object: name, Type: in.ObjType, Transaction: txName,
 		InvalidCount: intField(res, "invalid_count"), StaleCount: intField(res, "stale_count")},
-		collateralNote(loadNote(quantityNote(featureNote(placementNote(transactionNote(fmt.Sprintf("Object '%s' created successfully.", name), txName, txMerged), res), res), res), res), res, in.DocName))
+		collateralNote(loadNote(quantityNote(featureNote(placementNote(transactionNote(fmt.Sprintf("Object '%s' created successfully.", name), txName, txMerged), res), res), res), res), res, in.DocName)+shapesNote(res))
 	return s.withNotice(s.screenshot(ctx, conn, out, in.IncludeScreenshot, viewString(in.ViewName), in.DocName)), nil, nil
 }
 
@@ -160,7 +160,7 @@ func (s *Server) updateObject(ctx context.Context, req *mcp.CallToolRequest, in 
 	txName, txMerged := transactionFields(res)
 	out := render.SuccessResult(objectFront{Document: in.DocName, Object: name, Transaction: txName,
 		InvalidCount: intField(res, "invalid_count"), StaleCount: intField(res, "stale_count")},
-		collateralNote(loadNote(quantityNote(featureNote(placementNote(transactionNote(fmt.Sprintf("Object '%s' updated successfully.", name), txName, txMerged), res), res), res), res), res, in.DocName))
+		collateralNote(loadNote(quantityNote(featureNote(placementNote(transactionNote(fmt.Sprintf("Object '%s' updated successfully.", name), txName, txMerged), res), res), res), res), res, in.DocName)+shapesNote(res))
 	return s.withNotice(s.screenshot(ctx, conn, out, in.IncludeScreenshot, viewString(in.ViewName), in.DocName)), nil, nil
 }
 

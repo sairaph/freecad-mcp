@@ -39,6 +39,7 @@ Applies to obj_properties in create_object and update_object.
 
 - A link property takes an object name: {"Base": "Box", "Tool": "Cylinder"}.
 - A link list takes a list of names: {"Shapes": ["Box", "Cylinder"]} on Part::MultiFuse and Part::MultiCommon.
+- Part::Common, Part::Cut and Part::Fuse take exactly two inputs, Base and Tool. Part::MultiFuse and Part::MultiCommon take Shapes, a list of any number. A wrong name is refused and names the right type.
 - Create the linked objects first. An unknown name is an error.
 
 ## References

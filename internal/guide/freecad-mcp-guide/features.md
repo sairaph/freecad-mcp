@@ -21,6 +21,16 @@ Head sizes from the standards:
 - Keep the material file's minimum wall under a recess. When the part is thinner than the recess depth plus that wall, thicken the part around the screw, or use a shallower recess and tell the user the head stands proud by the difference. Never leave less than the minimum wall.
 - A recess or hole that opens sideways (its axis is horizontal in the print pose) is a horizontal hole: give the recess the same pointed top. Read Teardrop below.
 
+## D-shaft hole
+
+A motor shaft with a flat: build the hole tool as a cylinder intersected with a box, then cut it from the part.
+
+- Part::Cylinder with the shaft radius plus the allowance and Height longer than the part.
+- Part::Box that keeps the flat: its width across the flats is the shaft's across-flats size plus the same allowance. Place it so one face lies at the flat.
+- Part::Common with Base the cylinder and Tool the box. The result is the D-shaped tool.
+- Part::Cut with Base the part and Tool the Common.
+- The allowance applies to the flat as well as the round: across-flats plus allowance, not the exact across-flats.
+
 ## Teardrop
 
 A horizontal hole needs a pointed top: a round top sags. Build the tool, then cut it from the part with Part::Cut. r is the hole radius with its allowance, L the hole length, (x0, y0, z0) the centre of the hole's first end.

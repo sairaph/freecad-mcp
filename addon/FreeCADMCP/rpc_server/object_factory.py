@@ -28,6 +28,7 @@ from rpc_server import partdesign
 from rpc_server.property_mapper import FILLET_TYPES, Object, fillet_edges_text, quantity_values, reject_app_link, set_object_property
 from rpc_server.object_validation import failed_names, newly_failed_report, object_validity_error, stale_dependents
 from rpc_server.serialize import shape_summary
+from rpc_server.shape_changes import changed_shapes, snapshot
 from rpc_server.source_visibility import hide_sources, newly_hidden, visibility_snapshot
 from rpc_server.transactions import active_document, transaction
 
@@ -407,6 +408,19 @@ def _partdesign_fields(created: Any, plan: partdesign.Plan) -> dict[str, Any]:
     return fields
 
 
+def _own_names(doc: FreeCAD.Document, obj: Any) -> set[str]:
+    """The objects whose shape the reply of a call about ``obj`` already gives:
+    ``obj`` itself, and the Body it is the Tip of (the same shape)."""
+    names = {str(obj.Name)}
+    try:
+        body = partdesign.owner_body(doc, obj)
+        if body is not None and getattr(body, "Tip", None) is not None and body.Tip.Name == obj.Name:
+            names.add(str(body.Name))
+    except Exception:
+        pass
+    return names
+
+
 def shown_before(doc: FreeCAD.Document) -> dict[str, bool]:
     """``visibility_snapshot`` of the document before a change, or {} when it
     could not be taken: the report of what went hidden must never fail the
@@ -492,6 +506,7 @@ def create_object_gui(doc_name: str, obj: Object):
             existing = {o.Name for o in doc.Objects}
             before = failed_before(doc)
             shown = shown_before(doc)
+            shapes_before = snapshot(doc)
             requested = list(obj.properties)
             plan = partdesign.Plan()
             try:
@@ -523,6 +538,9 @@ def create_object_gui(doc_name: str, obj: Object):
                 if hidden:
                     extra["hidden"] = hidden
             collateral = collateral_report(doc, before, created)
+            if not problem:
+                # Other top-level shapes this call rebuilt (a Body built on the new feature).
+                extra.update(_reading("the shapes the call changed", lambda: changed_shapes(doc, shapes_before, _own_names(doc, created)), {}))
         # The transaction commits above regardless of problem, so an object
         # that failed to compute stays in the document; undo removes it, or
         # the caller can fix it with update_object or remove it with
@@ -591,6 +609,7 @@ def edit_object_gui(doc_name: str, obj: Object):
             try:
                 before = failed_before(doc)
                 shown = shown_before(doc)
+                shapes_before = snapshot(doc)
                 plan = partdesign.plan_update(doc, obj_ins, obj.properties)
                 set_object_property(doc, obj_ins, plan.properties)
                 if plan.geometry is not None:
@@ -621,6 +640,9 @@ def edit_object_gui(doc_name: str, obj: Object):
                     if hidden:
                         extra["hidden"] = hidden
                 collateral = collateral_report(doc, before, obj_ins)
+                if not problem:
+                    # Other top-level shapes this call rebuilt: a sketch changed under a Pad moves the Body.
+                    extra.update(_reading("the shapes the call changed", lambda: changed_shapes(doc, shapes_before, _own_names(doc, obj_ins)), {}))
             except Exception as e:
                 # transaction() commits on exit even when the block raises: discard it so a
                 # valid property set beside a bad one is not left applied.

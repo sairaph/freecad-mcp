@@ -339,6 +339,60 @@ def _take_fillet_edges(obj: FreeCAD.DocumentObject, properties: dict[str, Any]):
     return rest, edges, default
 
 
+#: Types that take Base and Tool, and the types that take a list of Shapes
+#: instead: the property names get swapped for the other kind.
+_TWO_INPUT_TYPES = ("Part::Common", "Part::Cut", "Part::Fuse")
+_MULTI_TYPES = ("Part::MultiCommon", "Part::MultiFuse")
+
+
+def _edit_distance(a: str, b: str) -> int:
+    """The edit distance between a and b: insertions, deletions, substitutions
+    and swaps of two neighbouring letters (a typo such as Lenght) count one each."""
+    rows = [list(range(len(b) + 1))]
+    for i, ca in enumerate(a, 1):
+        row = [i]
+        for j, cb in enumerate(b, 1):
+            best = min(rows[i - 1][j] + 1, row[j - 1] + 1, rows[i - 1][j - 1] + (ca != cb))
+            if i > 1 and j > 1 and ca == b[j - 2] and a[i - 2] == cb:
+                best = min(best, rows[i - 2][j - 2] + 1)
+            row.append(best)
+        rows.append(row)
+    return rows[-1][-1]
+
+
+def _own_property_names(obj: FreeCAD.DocumentObject) -> list[str]:
+    """The properties of ``obj`` that are not hidden."""
+    names = []
+    for name in obj.PropertiesList:
+        try:
+            if "Hidden" in obj.getPropertyStatus(name):
+                continue
+        except Exception:
+            pass
+        names.append(name)
+    return names
+
+
+def unknown_property_message(obj: FreeCAD.DocumentObject, prop: str) -> str:
+    """What to tell a caller who set a property ``obj`` does not have: its
+    nearest properties by edit distance (at most 3, the object's own and not
+    hidden), and for the boolean types that take Base and Tool or a list of
+    Shapes, the type that has the name."""
+    type_id = getattr(obj, "TypeId", "")
+    text = f"{type_id} '{obj.Name}' has no property '{prop}'."
+    wanted = prop.lower()
+    ranked = sorted((_edit_distance(wanted, name.lower()), name) for name in _own_property_names(obj))
+    limit = min(3, max(1, len(prop) // 3))
+    near = [name for distance, name in ranked if distance <= limit][:3]
+    if prop == "Shapes" and type_id in _TWO_INPUT_TYPES:
+        return text + f" {type_id} takes Base and Tool; Part::MultiCommon and Part::MultiFuse take Shapes."
+    if prop in ("Base", "Tool") and type_id in _MULTI_TYPES:
+        return text + f" {type_id} takes Shapes, a list of objects; Part::Common, Part::Cut and Part::Fuse take Base and Tool."
+    if near:
+        return text + " Nearest properties: " + ", ".join(near) + "."
+    return text + " get_object lists its properties."
+
+
 def set_object_property(
     doc: FreeCAD.Document, obj: FreeCAD.DocumentObject, properties: dict[str, Any]
 ):
@@ -460,6 +514,8 @@ def set_object_property(
                 setattr(obj, prop, val)
 
         except Exception as e:
+            if isinstance(e, AttributeError) and prop.split(".")[0] not in obj.PropertiesList and prop not in ("ShapeColor", "ViewObject"):
+                e = ValueError(unknown_property_message(obj, prop.split(".")[0]))
             agent_error(f"Property '{prop}' assignment error: {e}\n")
             failures.append(f"{prop}: {e}")
 

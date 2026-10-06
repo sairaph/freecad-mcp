@@ -46,6 +46,10 @@ Build one solid from sketches: a Body holds the sketches and features in order, 
 - Round edges last. Face and edge numbers change when an earlier feature changes.
 - Never round the cut edge of a hole that a screw or part locates in. Read features.md.
 
+## Placing a Body
+
+- Lay the whole part out with the Body's Placement: update_object on the Body, for example to stand it up or move it onto the plate. Never move or rotate its features one by one: they follow the Body and the sketches stay on their planes.
+
 ## Driving a part from a sheet
 
 - Sketch Geometry is fixed numbers: the tools set no dimensional constraints, so a cell cannot move a sketch line or change a circle.
