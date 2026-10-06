@@ -201,6 +201,20 @@ def _set_view_gui(doc_name: str | None, options: dict[str, Any]) -> dict[str, An
         stops, error = _tour_stops(doc, options.get("stops"))
         if error is not None:
             return error
+        if options.get("stops"):
+            # A stop the caller passed is checked like a static focus: an
+            # object this call shows or isolates counts, a hidden one does not.
+            for i, stop in enumerate(stops, 1):
+                if stop["focus"] != ["all"] and not any(frameable(doc.getObject(name)) for name in stop["focus"]):
+                    return fail(
+                        INVALID_INPUT,
+                        f"Stop {i}: none of its focus objects has a shape on screen.",
+                        "Make them visible with show, or name other objects.",
+                    )
+        else:
+            # The stops made from the objects drawn now: what this call hides or
+            # isolates away is not visited.
+            stops = [stop for stop in stops if any(frameable(doc.getObject(name)) for name in stop["focus"])]
         if not stops:
             return fail(
                 INVALID_INPUT,

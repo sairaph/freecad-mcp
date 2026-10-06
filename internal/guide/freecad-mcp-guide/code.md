@@ -31,6 +31,7 @@ Use a tool when one exists. Use code only for what no tool covers.
 - Runs a script in a separate freecadcmd process without a GUI. An OpenCascade crash kills only that process.
 - Use it for helical threads, lofts, sweeps, booleans with many tools and long rebuilds.
 - It runs on the computer running this MCP server and shares nothing with execute_code. Import FreeCAD and Part, open files with FreeCAD.openDocument(path), save with doc.save() or Shape.exportBrep(), and print progress.
+- Write Windows paths in scripts with forward slashes (C:/Users/me/part.FCStd) or as raw strings (r"C:\Users\me\part.FCStd"). In a plain string a backslash starts an escape, such as \t or \U, and breaks the path.
 - After it saves a file that is open in FreeCAD, call reload_document.
 - A document saved by a headless script opens under its file name, not the name the script gave it. Use the name open_document returns.
 - A Part::Cut, Part::Fuse or Part::Common object keeps its inputs visible. When a script saves one, set Visibility False on its inputs so the file opens showing only the result. A plain Part::Feature holding a result needs no such step.

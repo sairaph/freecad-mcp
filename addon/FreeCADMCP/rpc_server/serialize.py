@@ -8,6 +8,12 @@ from rpc_server.object_validation import object_states, object_status, object_va
 from rpc_server.property_mapper import quantity_text, quantity_type
 
 
+#: Properties the tool adds to document objects for its own bookkeeping: left out of
+#: get_object and the full object list (the FEM mesh record is tens of KB for a
+#: shape with many faces). rpc_server.fem_mesh.FINGERPRINT_PROPERTY is the only one.
+INTERNAL_PROPERTIES = frozenset({"McpMeshedShape"})
+
+
 def _get_optional_app_type(name: str) -> type | tuple[type, ...] | None:
     value = getattr(App, name, None)
     if isinstance(value, type):
@@ -238,6 +244,9 @@ def serialize_shape(shape):
     return result
 
 
+center_of_mass = _center_of_mass
+
+
 def shape_summary(shape):
     """What a created or changed object's shape holds, for the reply of
     create_object and update_object: ``{"null": True}`` for a null shape, else
@@ -408,6 +417,8 @@ def serialize_object(obj):
         }
 
         for prop in obj.PropertiesList:
+            if prop in INTERNAL_PROPERTIES:
+                continue
             try:
                 result["Properties"][prop] = serialize_value(getattr(obj, prop))
             except Exception as e:

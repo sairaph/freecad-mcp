@@ -9,6 +9,7 @@ import ObjectsFem
 from rpc_server.agent_log import agent_warning
 from rpc_server.errors import INVALID_INPUT, NOT_FOUND, fail, tool_call
 from rpc_server.fem_loads import analysis_loads
+from rpc_server.fem_mesh import GMSH_TYPE, generate_mesh, mesh_changed_since_meshing, mesh_info, meshed_shape
 from rpc_server.transactions import active_document, transaction
 
 
@@ -114,6 +115,112 @@ def _colour_by_von_mises(analysis, result_obj, von_mises) -> dict:
     }
 
 
+
+def missing_references(analysis) -> list[tuple[str, str, str]]:
+    """Every ``(constraint, object, sub-element)`` of the analysis's constraints
+    (their References and a force's Direction) that no longer exists on its
+    object: a face renumbered or removed by a change to the solid reaches no mesh
+    node, and the load or support silently does nothing."""
+    missing = []
+    for member in analysis.Group:
+        links = []
+        try:
+            links.extend(getattr(member, "References", None) or [])
+        except Exception:
+            pass
+        direction = getattr(member, "Direction", None) if hasattr(member, "Direction") else None
+        if isinstance(direction, (tuple, list)) and len(direction) == 2 and direction[0] is not None:
+            links.append(direction)
+        for link in links:
+            try:
+                target, subs = link[0], link[1]
+            except Exception:
+                continue
+            shape = getattr(target, "Shape", None)
+            if shape is None:
+                continue
+            for sub in subs or []:
+                if not sub:
+                    continue
+                try:
+                    shape.getElement(str(sub))
+                except Exception:
+                    missing.append((member.Name, target.Name, str(sub)))
+    return missing
+
+
+def _remesh_changed(analysis) -> list[dict]:
+    """Mesh again every Gmsh mesh of the analysis whose solid changed since it
+    was meshed. Returns what was done, one entry per mesh."""
+    done = []
+    for member in analysis.Group:
+        if _fem_type(member) != GMSH_TYPE:
+            continue
+        reason = mesh_changed_since_meshing(member)
+        if reason is None:
+            continue
+        before = int(member.FemMesh.NodeCount)
+        after = generate_mesh(member)
+        target = meshed_shape(member)
+        done.append(
+            {
+                "mesh": member.Name,
+                "shape": getattr(target, "Name", ""),
+                "found_by": reason,
+                "nodes_before": before,
+                "nodes_after": after,
+            }
+        )
+    return done
+
+
+_FIRST_ORDER_WARNING = (
+    "Mesh uses first order tetrahedra: bending results come out too stiff. "
+    "Set ElementOrder to 2nd with update_object."
+)
+
+_NO_DISPLACEMENT_ERROR = (
+    "The result has no displacement data: the solver produced nothing to read. "
+    "Inspect the solver output in the working directory."
+)
+
+_ALL_ZERO_ERROR = (
+    "The result is all zero: no load reached the mesh. The mesh may not match the solid, "
+    "or a load names a face that no longer exists."
+)
+
+
+def _unusable_result_error(loads: list, displacements: list) -> str | None:
+    """Why a run with loads gave nothing to use: no displacement data at all (the
+    solver wrote nothing to read), or a displacement list that is all zero (the
+    load did not reach the mesh). None for a usable result or an analysis with
+    no load."""
+    if not loads:
+        return None
+    if not displacements:
+        return _NO_DISPLACEMENT_ERROR
+    if not any(displacements):
+        return _ALL_ZERO_ERROR
+    return None
+
+
+def _mesh_notes(analysis) -> tuple[list[dict], list[str]]:
+    """What the run reports about each solid mesh of the analysis: its element
+    order and node count, and a warning for a first order one."""
+    meshes, warnings = [], []
+    for member in analysis.Group:
+        if _fem_type(member) not in (GMSH_TYPE, "Fem::FemMeshNetgen"):
+            continue
+        info = mesh_info(member)
+        meshes.append(info)
+        try:
+            solid = member.FemMesh.VolumeCount > 0
+        except Exception:
+            solid = False
+        if solid and info.get("element_order") == "1st" and _FIRST_ORDER_WARNING not in warnings:
+            warnings.append(_FIRST_ORDER_WARNING)
+    return meshes, warnings
+
 def run_fem_analysis(doc_name: str, analysis_name: str) -> dict:
     """Run the CalculiX solver on an existing FEM analysis container.
 
@@ -154,6 +261,22 @@ def run_fem_analysis(doc_name: str, analysis_name: str) -> dict:
         # FreeCAD can open an empty linked "-> run_fem_analysis" transaction in
         # whatever document the GUI has focused (App/Document.cpp:379-386).
         with active_document(doc), transaction("run_fem_analysis") as tx:
+            stage = "constraint check"
+            missing = missing_references(analysis)
+            if missing:
+                constraint, target, sub = missing[0]
+                more = f" ({len(missing) - 1} more)" if len(missing) > 1 else ""
+                return fail(
+                    INVALID_INPUT,
+                    f"Constraint '{constraint}' names {sub} of '{target}', which no longer exists{more}. "
+                    "A change to the solid renumbered or removed the face.",
+                    "Call " + tool_call("list_subelements", {"doc_name": doc_name, "obj_name": target, "kind": "faces"})
+                    + " to see the faces, then set the constraint's References again with update_object.",
+                )
+
+            stage = "remeshing"
+            remeshed = _remesh_changed(analysis)
+
             stage = "solver resolution"
             solver = _find_calculix_solver(analysis)
             if solver is None:
@@ -211,6 +334,8 @@ def run_fem_analysis(doc_name: str, analysis_name: str) -> dict:
             disp = list(getattr(result_obj, "DisplacementLengths", None) or [])
             doc.recompute()
 
+            loads = analysis_loads(analysis)
+            meshes, warnings = _mesh_notes(analysis)
             reply = {
                 "success": True,
                 "result_object": result_obj.Name,
@@ -218,10 +343,21 @@ def run_fem_analysis(doc_name: str, analysis_name: str) -> dict:
                 "max_von_mises_MPa": max(vm) if vm else None,
                 "min_von_mises_MPa": min(vm) if vm else None,
                 "max_displacement_mm": max(disp) if disp else None,
-                "loads": analysis_loads(analysis),
+                "loads": loads,
+                "meshes": meshes,
                 "working_dir": work_dir,
                 **tx.reply_fields(),
             }
+            if remeshed:
+                reply["remeshed"] = remeshed
+            if warnings:
+                reply["warnings"] = warnings
+            error = _unusable_result_error(loads, disp)
+            if error:
+                # The result object stays, so the run can be looked at.
+                reply["success"] = False
+                reply["error"] = error
+                return reply
             colouring = _colour_by_von_mises(analysis, result_obj, vm)
             if colouring:
                 reply.update(colouring)

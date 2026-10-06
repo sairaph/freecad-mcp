@@ -183,3 +183,28 @@ def test_the_solid_count_is_blank_without_a_shape_and_zero_for_an_empty_or_unrea
     assert serialize.solid_count_of(types.SimpleNamespace(Shape=types.SimpleNamespace(Solids=[]))) == 0
     assert serialize.solid_count_of(types.SimpleNamespace(Shape=types.SimpleNamespace(Solids=[1, 2]))) == 2
     assert serialize.solid_count_of(types.SimpleNamespace(Shape=types.SimpleNamespace())) == 0
+
+
+def test_the_tools_own_bookkeeping_properties_are_not_serialized():
+    class _Obj:
+        Name = "Mesh"
+        Label = "Mesh"
+        TypeId = "Fem::FemMeshShapeBaseObjectPython"
+        State = ["Up-to-date"]
+        PropertiesList = ["Label", "McpMeshedShape"]
+        Label = "Mesh"
+        McpMeshedShape = '{"face_list": [' + "[1]," * 5000 + "[1]]}"
+        Placement = _StubPlacement()
+        Shape = _GoodShape()
+
+        def isValid(self):
+            return True
+
+        def getStatusString(self):
+            return "Valid"
+
+    result = serialize.serialize_object(_Obj())
+    assert "McpMeshedShape" not in result["Properties"] and "Label" in result["Properties"]
+    assert "McpMeshedShape" not in str(result)
+    # The name the FEM code stores its record under is the one left out.
+    assert "McpMeshedShape" in serialize.INTERNAL_PROPERTIES
