@@ -47,6 +47,7 @@ type updateSpreadsheetCellsFront struct {
 	// that count invalid_count, so this does too.
 	ErrorCount   int    `yaml:"error_count"`
 	InvalidCount int    `yaml:"invalid_count"`
+	StaleCount   int    `yaml:"stale_count"`
 	Transaction  string `yaml:"transaction,omitempty"`
 }
 
@@ -131,6 +132,7 @@ func (s *Server) updateSpreadsheetCells(ctx context.Context, _ *mcp.CallToolRequ
 		Updated:      len(updated),
 		ErrorCount:   countCellErrors(rows),
 		InvalidCount: invalidObjectsCount(res),
+		StaleCount:   intField(res, "stale_count"),
 		Transaction:  transactionName,
 	}
 

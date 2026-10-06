@@ -214,7 +214,7 @@ var toolTexts = map[string]toolText{
 		Params:      map[string]string{"kind": "which sub-elements to list (default faces)"},
 	},
 	"create_object": {
-		Description: `Create one object in a document. Use the name the reply returns (FreeCAD may rename: Box001). The reply gives the shape (solids, size, volume), warns of an empty result or a Cut that removed nothing, and lists the quantities set, the edges of a fillet or chamfer, and the objects that went hidden (booleans, compounds, Fillet, Chamfer, Extrusion, Revolution, Thickness hide theirs). An error before the object exists creates nothing; one that does not compute stays: fix it with update_object or delete_object.
+		Description: `Create one object in a document. Use the name the reply returns (FreeCAD may rename: Box001). The reply gives the shape (solids, size, volume), warns of an empty result or a no-op Cut, and lists the quantities set, the edges of a fillet or chamfer, and the objects that went hidden (booleans, compounds, Fillet, Extrusion and others hide theirs), and any other object it made fail. An error before the object exists creates nothing; one that does not compute stays: fix it with update_object or delete_object.
 FEM: create Fem::AnalysisPython first; pass analysis_name for its material, constraints and mesh; then run_fem_analysis. Fem::MaterialCommon takes Material as {"Name": "Steel", "YoungsModulus": "210 GPa", "PoissonRatio": 0.3, "Density": "7900 kg/m^3"}. Fem::FemMeshGmsh takes Shape (the solid's name) and CharacteristicLengthMax/Min in mm, and meshes on creation. A Fem::ConstraintForce acts along its face's outward normal, a Fem::ConstraintPressure into it; Reversed true flips either.`,
 		Params: map[string]string{
 			"obj_type":       `FreeCAD type, such as Part::Box, Part::Cylinder, Part::Cut, PartDesign::Body, Spreadsheet::Sheet, Fem::AnalysisPython, Fem::ConstraintFixed. Of the Python-only types only these work: Part::Tube (needs InnerRadius, OuterRadius, Height), Draft::Circle (Radius), Draft::Rectangle (Length, Height), Draft::Polygon (FacesNumber, Radius), Draft::Wire (Points, optional Closed); build others with execute_code`,
@@ -224,14 +224,14 @@ FEM: create Fem::AnalysisPython first; pass analysis_name for its material, cons
 		},
 	},
 	"update_object": {
-		Description: `Set properties of an existing object: dimensions, Placement, links, expressions, colors. obj_properties follows the same rules as in create_object. The reply gives the shape now (solids, size, volume), warns of a result with no solid, lists each quantity it set with its unit, the edges now of a fillet or chamfer, and the objects that went hidden; check the rest with get_object.`,
+		Description: `Set properties of an existing object: dimensions, Placement, links, expressions, colors. obj_properties follows the same rules as in create_object. The reply gives the shape now (solids, size, volume), warns of a result with no solid, lists each quantity it set with its unit, the edges now of a fillet or chamfer, and the objects that went hidden; names any other object the change made fail, and what was not rebuilt; check the rest with get_object.`,
 		Params:      map[string]string{"obj_properties": objPropsText},
 	},
 	"delete_object": {
-		Description: `Delete an object. Objects that use it (a Part::Cut's Base or Tool) may become invalid: call recompute_document afterwards to see which.`,
+		Description: `Delete an object, even one others use. The reply lists the objects that failed because of it (a Part::Cut's Base or Tool) and those not rebuilt, which keep their old shape.`,
 	},
 	"recompute_document": {
-		Description: `Recompute a document and list every object that failed, with FreeCAD's message, every object still touched, and every boolean whose result is empty or removed nothing. Call it after a series of changes, after delete_object, or when a document needs a recompute. A failed fillet or chamfer says what to do, and a dependent says which failed object it waits for. Failures do not fail the call; fix them with update_object or delete_object.`,
+		Description: `Recompute a document and list every object that failed, with FreeCAD's message, every boolean whose result is empty or removed nothing, and the objects built on a failed one that were not rebuilt (they keep their old shape). Call it after a series of changes, after delete_object, or when a document needs a recompute. A failed fillet or chamfer says what to do, and a dependent says which failed object it waits for. Failures do not fail the call; fix them with update_object or delete_object.`,
 		Params:      map[string]string{"timeout": timeoutText(120)},
 	},
 	"undo": {

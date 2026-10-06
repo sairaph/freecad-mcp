@@ -28,9 +28,10 @@ def recompute_document(doc_name: str, timeout: Any = None) -> dict[str, Any]:
 
     Reply: ``{"success", "document", "recomputed", "object_count",
     "invalid_objects", "invalid_count", "invalid_truncated",
-    "touched_objects", "touched_count", "touched_truncated", "empty_results",
-    "empty_count", "empty_truncated"}``. The lists
-    are capped at MAX_LISTED_OBJECTS rows, with the matching ``*_count``
+    "stale_objects", "stale_count", "stale_truncated", "touched_objects",
+    "touched_count", "touched_truncated", "empty_results", "empty_count",
+    "empty_truncated"}``. ``touched_*`` holds only the Touched objects that are
+    not listed as invalid. The lists are capped at MAX_LISTED_OBJECTS rows, with the matching ``*_count``
     giving the true total and ``*_truncated`` set once the cap cuts the
     list short. GUI thread, default timeout ``RECOMPUTE_TIMEOUT``. No
     transaction.
@@ -45,16 +46,21 @@ def recompute_document(doc_name: str, timeout: Any = None) -> dict[str, Any]:
             return error
         recomputed = doc.recompute()
         objects = doc.Objects
+        invalid = invalid_objects_report(objects)
+        invalid_names = {row.get("name") for row in invalid["invalid_objects"]}
+        # The objects still Touched that are not listed as invalid: the invalid
+        # list holds every failed object, Touched or not, so a Touched object
+        # missing from it was cut off by the list's cap.
         touched_objects: list[str] = []
         touched_count = 0
         for obj in objects:
-            states = object_states(obj)
-            if any(state.strip().casefold() == "touched" for state in states):
+            name = str(getattr(obj, "Name", ""))
+            if name in invalid_names:
+                continue
+            if any(state.strip().casefold() == "touched" for state in object_states(obj)):
                 touched_count += 1
                 if len(touched_objects) < MAX_LISTED_OBJECTS:
-                    touched_objects.append(str(getattr(obj, "Name", "")))
-        invalid = invalid_objects_report(objects)
-        invalid_names = {row.get("name") for row in invalid["invalid_objects"]}
+                    touched_objects.append(name)
         empty_results: list[dict[str, str]] = []
         empty_count = 0
         for obj in objects:

@@ -27,6 +27,7 @@ type importFileFront struct {
 	Importer        string `yaml:"importer"`
 	ObjectCount     int    `yaml:"object_count"`
 	Transaction     string `yaml:"transaction,omitempty"`
+	StaleCount      int    `yaml:"stale_count,omitempty"`
 }
 
 // importListCap bounds how many created or invalid objects the body lists, so
@@ -90,6 +91,7 @@ func (s *Server) importFile(ctx context.Context, _ *mcp.CallToolRequest, in impo
 		Importer:        importer,
 		ObjectCount:     objectCount,
 		Transaction:     transaction,
+		StaleCount:      intField(res, "stale_count"),
 	}
 
 	var body strings.Builder
@@ -142,6 +144,9 @@ func (s *Server) importFile(ctx context.Context, _ *mcp.CallToolRequest, in impo
 		// so counting against it here would understate how many were left out.
 		if more := invalidTotal - len(shown); more > 0 {
 			fmt.Fprintf(&body, "- and %d more (use list_objects with {\"doc_name\": %q}).\n", more, doc)
+		}
+		if note := staleNote(res); note != "" {
+			body.WriteString("\n" + note + "\n")
 		}
 	}
 

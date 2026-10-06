@@ -8,6 +8,9 @@ Model holes, fits, threads and clips for the material the part prints in. Read i
 
 Print each part in the pose it prints in. Lay every part flat on the plate with its Placement: the face that sits on the plate at z 0, the part inside x 0 to the plate width and y 0 to the plate depth, with a few mm between parts.
 
+- Move the top object of each part, the one check_printability lists (the last Cut or Fillet), not its inputs.
+- A lid or any part with recesses: put the face whose recesses would need bridges facing up, so countersinks and counterbores open upward.
+- A part with a cosmetic face puts that face up, unless it is the flat one.
 - Set the pose with update_object on Placement, or in execute_code with the part's Placement.
 - A part is laid flat by rotating it about a horizontal axis by an angle that is not 0, then moving it so its lowest point is z 0.
 - A part that must not be laid flat because of its layers (a thin tab, a clip) is rotated to the pose the user names.

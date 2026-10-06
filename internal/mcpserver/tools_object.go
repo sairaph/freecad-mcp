@@ -70,6 +70,9 @@ type objectFront struct {
 	Object      string `yaml:"object_name"`
 	Type        string `yaml:"object_type,omitempty"`
 	Transaction string `yaml:"transaction,omitempty"`
+	// InvalidCount and StaleCount are set when the change made other objects fail.
+	InvalidCount int `yaml:"invalid_count,omitempty"`
+	StaleCount   int `yaml:"stale_count,omitempty"`
 }
 
 type objectsFront struct {
@@ -114,7 +117,7 @@ func (s *Server) createObject(ctx context.Context, req *mcp.CallToolRequest, in 
 			// document under this name.
 			return s.withNotice(render.ErrorResult(render.Error{
 				Code:    codeFreeCAD,
-				Message: shortMessage(fmt.Sprintf("Object '%s' was created in '%s' but is not valid: %s", name, in.DocName, errorText(res))),
+				Message: withStaleNote(shortMessage(fmt.Sprintf("Object '%s' was created in '%s' but is not valid: %s", name, in.DocName, errorText(res))), res),
 				Hint:    fixOrRemoveHint(in.DocName, name),
 				Fields:  map[string]any{"object_name": name},
 			})), nil, nil
@@ -124,8 +127,9 @@ func (s *Server) createObject(ctx context.Context, req *mcp.CallToolRequest, in 
 	}
 	name := str(res, "object_name")
 	txName, txMerged := transactionFields(res)
-	out := render.SuccessResult(objectFront{Document: in.DocName, Object: name, Type: in.ObjType, Transaction: txName},
-		loadNote(quantityNote(featureNote(placementNote(transactionNote(fmt.Sprintf("Object '%s' created successfully.", name), txName, txMerged), res), res), res), res))
+	out := render.SuccessResult(objectFront{Document: in.DocName, Object: name, Type: in.ObjType, Transaction: txName,
+		InvalidCount: intField(res, "invalid_count"), StaleCount: intField(res, "stale_count")},
+		collateralNote(loadNote(quantityNote(featureNote(placementNote(transactionNote(fmt.Sprintf("Object '%s' created successfully.", name), txName, txMerged), res), res), res), res), res, in.DocName))
 	return s.withNotice(s.screenshot(ctx, conn, out, in.IncludeScreenshot, viewString(in.ViewName), in.DocName)), nil, nil
 }
 
@@ -148,8 +152,9 @@ func (s *Server) updateObject(ctx context.Context, req *mcp.CallToolRequest, in 
 	}
 	name := str(res, "object_name")
 	txName, txMerged := transactionFields(res)
-	out := render.SuccessResult(objectFront{Document: in.DocName, Object: name, Transaction: txName},
-		loadNote(quantityNote(featureNote(placementNote(transactionNote(fmt.Sprintf("Object '%s' updated successfully.", name), txName, txMerged), res), res), res), res))
+	out := render.SuccessResult(objectFront{Document: in.DocName, Object: name, Transaction: txName,
+		InvalidCount: intField(res, "invalid_count"), StaleCount: intField(res, "stale_count")},
+		collateralNote(loadNote(quantityNote(featureNote(placementNote(transactionNote(fmt.Sprintf("Object '%s' updated successfully.", name), txName, txMerged), res), res), res), res), res, in.DocName))
 	return s.withNotice(s.screenshot(ctx, conn, out, in.IncludeScreenshot, viewString(in.ViewName), in.DocName)), nil, nil
 }
 
@@ -168,8 +173,9 @@ func (s *Server) deleteObject(ctx context.Context, _ *mcp.CallToolRequest, in ob
 	}
 	name := str(res, "object_name")
 	txName, txMerged := transactionFields(res)
-	out := render.SuccessResult(objectFront{Document: in.DocName, Object: name, Transaction: txName},
-		transactionNote(fmt.Sprintf("Object '%s' deleted successfully.", name), txName, txMerged))
+	out := render.SuccessResult(objectFront{Document: in.DocName, Object: name, Transaction: txName,
+		InvalidCount: intField(res, "invalid_count"), StaleCount: intField(res, "stale_count")},
+		collateralNote(transactionNote(fmt.Sprintf("Object '%s' deleted successfully.", name), txName, txMerged), res, in.DocName))
 	return s.withNotice(s.screenshot(ctx, conn, out, in.IncludeScreenshot, viewString(in.ViewName), in.DocName)), nil, nil
 }
 

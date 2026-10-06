@@ -1090,6 +1090,7 @@ class FreeCADRPC:
         return _run_fem_analysis(doc_name, analysis_name)
 
     def _delete_object_gui(self, doc_name: str, obj_name: str):
+        from rpc_server.object_factory import collateral_report, failed_before
         from rpc_server.transactions import active_document, transaction
 
         try:
@@ -1104,10 +1105,15 @@ class FreeCADRPC:
             # "-> delete_object" transaction in whatever document the GUI has
             # focused (App/Document.cpp:379-386).
             with active_document(doc), transaction("delete_object") as tx:
+                before = failed_before(doc)
                 doc.removeObject(obj_name)
                 doc.recompute()
+                # What the objects built on the deleted one did: FreeCAD fails
+                # the ones that linked it and leaves the rest holding the shape
+                # they had.
+                collateral = collateral_report(doc, before, None)
             FreeCAD.Console.PrintMessage(f"Object '{obj_name}' deleted via RPC.\n")
-            return {"success": True, **tx.reply_fields()}
+            return {"success": True, **tx.reply_fields(), **collateral}
         except Exception as e:
             return str(e)
 

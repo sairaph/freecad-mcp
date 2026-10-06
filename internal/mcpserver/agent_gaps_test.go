@@ -347,3 +347,139 @@ func TestListSubelementsMarksSmoothEdgesAndSeams(t *testing.T) {
 		t.Errorf("a plain edge is marked smooth:\n%s", text)
 	}
 }
+
+func TestFailedObjectsNameTheObjectsThatWereNotRebuilt(t *testing.T) {
+	stale := []any{
+		map[string]any{"name": "Shell", "depends_on": "OuterFillet"}, map[string]any{"name": "Body", "depends_on": "OuterFillet"},
+		map[string]any{"name": "Gear", "depends_on": "Other"},
+	}
+	fc := addon(t, map[string]xmlrpctest.Handler{
+		"recompute_document": func([]any) (any, error) {
+			return map[string]any{"success": true, "document": "D", "recomputed": int64(1), "object_count": int64(5),
+				"invalid_count": int64(1), "invalid_truncated": false, "touched_count": int64(0), "touched_truncated": false,
+				"touched_objects": []any{}, "empty_results": []any{}, "empty_count": int64(0), "empty_truncated": false,
+				"stale_objects": stale, "stale_count": int64(3), "stale_truncated": false,
+				"invalid_objects": []any{map[string]any{"name": "OuterFillet", "type": "Part::Fillet", "status": "BRep_API: command not done", "waits_for": ""}}}, nil
+		},
+		"edit_object": func([]any) (any, error) {
+			return map[string]any{"success": false, "object_name": "OuterFillet", "error": "Object 'OuterFillet' exists but failed to compute",
+				"stale_objects": stale[:2], "stale_count": int64(2), "stale_truncated": false}, nil
+		},
+	})
+	cs := session(t, settingsFor(fc))
+	text := replyText(call(t, cs, "recompute_document", map[string]any{"doc_name": "D", "include_screenshot": false}))
+	for _, want := range []string{"stale_count: 3",
+		"Not rebuilt, still the shape from before: Shell, Body (they depend on OuterFillet, which failed); Gear (it depends on Other, which failed)."} {
+		if !strings.Contains(text, want) {
+			t.Errorf("recompute reply lacks %q:\n%s", want, text)
+		}
+	}
+	if strings.Contains(text, "still touched") {
+		t.Errorf("the failed object was counted as touched:\n%s", text)
+	}
+	text = replyText(call(t, cs, "update_object", map[string]any{"doc_name": "D", "obj_name": "OuterFillet", "obj_properties": map[string]any{"Radius": 30}, "include_screenshot": false}))
+	if !strings.Contains(text, "Not rebuilt, still the shape from before: Shell, Body (they depend on OuterFillet, which failed).") {
+		t.Errorf("update reply lacks the note:\n%s", text)
+	}
+}
+
+func TestRecomputeListsTouchedObjectsThatAreNotInvalid(t *testing.T) {
+	fc := addon(t, map[string]xmlrpctest.Handler{
+		"recompute_document": func([]any) (any, error) {
+			return map[string]any{"success": true, "document": "D", "recomputed": int64(1), "object_count": int64(5),
+				"invalid_count": int64(300), "invalid_truncated": true, "touched_count": int64(2), "touched_truncated": false,
+				"touched_objects": []any{"Late1", "Late2"}, "empty_results": []any{}, "empty_count": int64(0), "empty_truncated": false,
+				"stale_objects": []any{}, "stale_count": int64(0), "stale_truncated": false,
+				"invalid_objects": []any{map[string]any{"name": "First", "type": "Part::Cut", "status": "x", "waits_for": ""}}}, nil
+		},
+	})
+	text := replyText(call(t, session(t, settingsFor(fc)), "recompute_document", map[string]any{"doc_name": "D", "include_screenshot": false}))
+	if !strings.Contains(text, "2 object(s) are still touched after recompute") || !strings.Contains(text, "Not listed above as invalid: Late1, Late2") {
+		t.Errorf("reply = %s", text)
+	}
+}
+
+func TestSuccessfulUpdateAndCreateNameTheObjectsTheyMadeFail(t *testing.T) {
+	collateral := map[string]any{
+		"invalid_objects": []any{map[string]any{"name": "OuterFillet", "type": "Part::Fillet", "status": "BRep_API: command not done", "waits_for": ""}},
+		"invalid_count":   int64(1), "invalid_truncated": false,
+		"stale_objects": []any{map[string]any{"name": "Shell", "depends_on": "OuterFillet"}, map[string]any{"name": "Body", "depends_on": "OuterFillet"}},
+		"stale_count":   int64(2), "stale_truncated": false,
+	}
+	reply := func(name string) func([]any) (any, error) {
+		return func([]any) (any, error) {
+			res := map[string]any{"success": true, "object_name": name}
+			for k, v := range collateral {
+				res[k] = v
+			}
+			return res, nil
+		}
+	}
+	fc := addon(t, map[string]xmlrpctest.Handler{"create_object": reply("Cut2"), "edit_object": reply("Outer")})
+	cs := session(t, settingsFor(fc))
+	for tool, args := range map[string]map[string]any{
+		"update_object": {"doc_name": "D", "obj_name": "Outer", "obj_properties": map[string]any{"Width": 2}, "include_screenshot": false},
+		"create_object": {"doc_name": "D", "obj_name": "Cut2", "obj_type": "Part::Cut", "include_screenshot": false},
+	} {
+		res := call(t, cs, tool, args)
+		text := replyText(res)
+		if res.IsError {
+			t.Errorf("%s failed although the object itself is fine:\n%s", tool, text)
+		}
+		for _, want := range []string{"successfully.", "invalid_count: 1", "stale_count: 2", "1 other object(s) failed after this change:",
+			"- OuterFillet (Part::Fillet): BRep_API: command not done.", "Not rebuilt, still the shape from before: Shell, Body (they depend on OuterFillet, which failed)."} {
+			if !strings.Contains(text, want) {
+				t.Errorf("%s reply lacks %q:\n%s", tool, want, text)
+			}
+		}
+	}
+}
+
+func TestFailedUpdateErrorNamesTheOtherObjectsItMadeFail(t *testing.T) {
+	fc := addon(t, map[string]xmlrpctest.Handler{"edit_object": func([]any) (any, error) {
+		return map[string]any{"success": false, "object_name": "Outer", "error": "Object 'Outer' exists but failed to compute",
+			"invalid_objects": []any{map[string]any{"name": "Other", "type": "Part::Cut", "status": "waits for Outer, which failed."}},
+			"invalid_count":   int64(1), "stale_objects": []any{}, "stale_count": int64(0)}, nil
+	}})
+	res := call(t, session(t, settingsFor(fc)), "update_object", map[string]any{"doc_name": "D", "obj_name": "Outer", "obj_properties": map[string]any{"Width": 2}, "include_screenshot": false})
+	if text := replyText(res); !res.IsError || !strings.Contains(text, "Other objects failed after this change: Other (Part::Cut): waits for Outer, which failed.") {
+		t.Errorf("reply = %s", text)
+	}
+}
+
+func TestDeleteNamesTheObjectsItLeftFailedOrStale(t *testing.T) {
+	fc := addon(t, map[string]xmlrpctest.Handler{"delete_object": func([]any) (any, error) {
+		return map[string]any{"success": true,
+			"invalid_objects": []any{map[string]any{"name": "OuterFillet", "type": "Part::Fillet", "status": "No object linked", "waits_for": ""}},
+			"invalid_count":   int64(1), "invalid_truncated": false,
+			"stale_objects": []any{map[string]any{"name": "Shell", "depends_on": "OuterFillet"}}, "stale_count": int64(1), "stale_truncated": false}, nil
+	}})
+	res := call(t, session(t, settingsFor(fc)), "delete_object", map[string]any{"doc_name": "D", "obj_name": "Outer", "include_screenshot": false})
+	text := replyText(res)
+	if res.IsError {
+		t.Fatalf("the delete itself succeeded:\n%s", text)
+	}
+	for _, want := range []string{"deleted successfully.", "invalid_count: 1", "stale_count: 1", "1 other object(s) failed after this change:",
+		"- OuterFillet (Part::Fillet): No object linked.", "Not rebuilt, still the shape from before: Shell (it depends on OuterFillet, which failed)."} {
+		if !strings.Contains(text, want) {
+			t.Errorf("reply lacks %q:\n%s", want, text)
+		}
+	}
+}
+
+func TestImportNamesTheObjectsBuiltOnAFailedOne(t *testing.T) {
+	fc := addon(t, map[string]xmlrpctest.Handler{"import_file": func([]any) (any, error) {
+		return map[string]any{"success": true, "document": "D", "format": "step", "importer": "Import", "object_count": int64(3), "created_document": false,
+			"created_objects": []any{map[string]any{"name": "Fil", "label": "Fil", "type": "Part::Fillet"}},
+			"invalid_objects": []any{map[string]any{"name": "Fil", "type": "Part::Fillet", "status": "BRep_API: command not done", "waits_for": ""}},
+			"invalid_count":   int64(1), "invalid_truncated": false,
+			"stale_objects": []any{map[string]any{"name": "Cut", "depends_on": "Fil"}}, "stale_count": int64(1), "stale_truncated": false}, nil
+	}})
+	text := replyText(call(t, session(t, settingsFor(fc)), "import_file", map[string]any{"path": "C:/x/part.step", "include_screenshot": false}))
+	for _, want := range []string{"stale_count: 1", "1 object(s) invalid after recompute:", "- Fil (Part::Fillet): BRep_API: command not done.",
+		"Not rebuilt, still the shape from before: Cut (it depends on Fil, which failed)."} {
+		if !strings.Contains(text, want) {
+			t.Errorf("import reply lacks %q:\n%s", want, text)
+		}
+	}
+}

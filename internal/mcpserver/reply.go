@@ -199,9 +199,21 @@ func reported(what string, res map[string]any, hint string) *mcp.CallToolResult 
 	}
 	return render.ErrorResult(render.Error{
 		Code:    codeFreeCAD,
-		Message: shortMessage(fmt.Sprintf("Failed to %s: %s", what, msg)),
+		Message: withStaleNote(shortMessage(fmt.Sprintf("Failed to %s: %s", what, msg)), res),
 		Hint:    hint,
 	})
+}
+
+// withStaleNote adds to an error message the other objects the change made fail
+// and the objects that were not rebuilt, when the reply carries any.
+func withStaleNote(message string, res map[string]any) string {
+	if failed := failedNames(res); failed != "" {
+		message += " Other objects failed after this change: " + failed + "."
+	}
+	if note := staleNote(res); note != "" {
+		message += " " + note
+	}
+	return message
 }
 
 // shortMessage keeps the start of an error message, which says what failed,
@@ -511,6 +523,9 @@ func invalidObjectsBody(res map[string]any, docName string) string {
 			b.WriteString("\n- " + invalidObjectRow(obj, docName))
 		}
 	}
+	if note := staleNote(res); note != "" {
+		b.WriteString("\n\n" + note)
+	}
 	return b.String()
 }
 
@@ -722,4 +737,82 @@ func shapeText(shape map[string]any) string {
 		parts = append(parts, fmt.Sprintf("volume %.1f mm^3", volume))
 	}
 	return strings.Join(parts, ", ")
+}
+
+// staleNote says which objects were not rebuilt because an object they depend
+// on failed: FreeCAD leaves them valid and up to date with the shape they had
+// before, so nothing else reports them. They are grouped by the failed object.
+// "" when the reply lists none.
+func staleNote(res map[string]any) string {
+	rows, _ := res["stale_objects"].([]any)
+	var order []string
+	groups := map[string][]string{}
+	for _, item := range rows {
+		row, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		source := str(row, "depends_on")
+		if _, seen := groups[source]; !seen {
+			order = append(order, source)
+		}
+		groups[source] = append(groups[source], str(row, "name"))
+	}
+	if len(order) == 0 {
+		return ""
+	}
+	parts := make([]string, 0, len(order))
+	for _, source := range order {
+		names := groups[source]
+		who := "they depend on"
+		if len(names) == 1 {
+			who = "it depends on"
+		}
+		parts = append(parts, fmt.Sprintf("%s (%s %s, which failed)", strings.Join(names, ", "), who, source))
+	}
+	note := "Not rebuilt, still the shape from before: " + strings.Join(parts, "; ") + "."
+	if boolField(res, "stale_truncated") {
+		note += fmt.Sprintf(" (showing %d of %d)", len(rows), intField(res, "stale_count"))
+	}
+	return note
+}
+
+// collateralNote adds the objects a successful create or update made fail
+// (they had not failed before the call), with the same rows as every other
+// reply that lists failed objects, and the objects that were not rebuilt.
+func collateralNote(body string, res map[string]any, docName string) string {
+	objs, _ := res["invalid_objects"].([]any)
+	if len(objs) == 0 {
+		return body
+	}
+	var b strings.Builder
+	b.WriteString(body)
+	if boolField(res, "invalid_truncated") {
+		fmt.Fprintf(&b, "\n\n%d other object(s) failed after this change, showing %d:", invalidObjectsCount(res), len(objs))
+	} else {
+		fmt.Fprintf(&b, "\n\n%d other object(s) failed after this change:", invalidObjectsCount(res))
+	}
+	for _, item := range objs {
+		if obj, ok := item.(map[string]any); ok {
+			b.WriteString("\n- " + invalidObjectRow(obj, docName))
+		}
+	}
+	if note := staleNote(res); note != "" {
+		b.WriteString("\n\n" + note)
+	}
+	return b.String()
+}
+
+// failedNames lists the invalid objects of a reply as "name (type): status", for
+// an error message, without the fix hints.
+func failedNames(res map[string]any) string {
+	objs, _ := res["invalid_objects"].([]any)
+	var parts []string
+	for _, item := range objs {
+		if obj, ok := item.(map[string]any); ok {
+			status := strings.TrimSuffix(str(obj, "status"), ".")
+			parts = append(parts, fmt.Sprintf("%s (%s): %s", str(obj, "name"), str(obj, "type"), status))
+		}
+	}
+	return strings.Join(parts, "; ")
 }
