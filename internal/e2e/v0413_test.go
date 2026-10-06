@@ -41,7 +41,7 @@ func TestHollowPartJobFollowsTheFeedbackOfTheTools(t *testing.T) {
 	}
 
 	must(t, create("Round", "Part::Fillet", map[string]any{"Base": "Outer", "Edges": vertical, "Radius": 3}),
-		"Edges now: "+vertical[0]+" r3", "Hidden: Outer (the source of Round, as FreeCAD's own command does).")
+		"Edges now: "+vertical[0]+" r3", "Hidden: Outer (inputs of Round).")
 	if got := visible("Outer", "Round"); !strings.Contains(got, "Outer False") || !strings.Contains(got, "Round True") {
 		t.Fatalf("visibility = %s", got)
 	}

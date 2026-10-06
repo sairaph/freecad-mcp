@@ -214,12 +214,24 @@ The reply of a fillet or chamfer call lists its edges as they are now
 
 `Part::Fillet`, `Part::Chamfer`, `Part::Extrusion`, `Part::Revolution` and
 `Part::Thickness` hide their source object, as FreeCAD's own commands do, so
-the source does not cover the result; the reply names it (`Hidden: Outer (the
-source of Round, as FreeCAD's own command does).`). Only a source that was
-visible is hidden, nothing is hidden for a failed or invalid object, and
-`update_object` hides the source only when it sets the link again (`Base`,
-`Source` or `Faces`). Mirroring, offsets, lofts and sweeps leave their source
-shown; booleans and compounds hide theirs themselves.
+the source does not cover the result. Only a source that was visible is
+hidden, nothing is hidden for a failed or invalid object, and `update_object`
+hides the source only when it sets the link again (`Base`, `Source` or
+`Faces`). Mirroring, offsets, lofts and sweeps leave their source shown;
+booleans and compounds hide theirs themselves (their view providers do).
+
+The reply of `create_object` and `update_object` names every object that went
+from visible to hidden during the call, whoever hid it: `Hidden: Block, Hole
+(inputs of Clip).` For an object with a `Shape` (not a sheet, a FEM object or a
+group) it also gives what the shape holds: `Shape: 1 solid, 40 x 20 x 12 mm,
+volume 9503.5 mm^3` (the tight box; a shape without a solid says `no solid`
+and counts its shells, faces or edges instead). When the shape is null or has
+no solid although an input has one (a `Part::Common` of parts that do not
+overlap, a `Part::Cut` whose tool removes the base) the reply adds a warning,
+`Warning: The result holds no solid: its inputs do not overlap. Check their
+Placement.` The object stays and the call still succeeds. Types whose result
+is edges or faces by design (section, slice, cross sections, projection, 2D
+offset) give no warning.
 
 Any other Python-implemented type must be built with `execute_code` instead.
 The Draft factories name objects themselves, so for those the returned object
@@ -320,8 +332,9 @@ may become invalid; call `list_objects` afterwards to check the document.
 List every object in a document with its type and properties.
 
 - `doc_name` (string, required)
-- `compact` (boolean, default `false`): short rows (name, label, type, state,
-  valid, parent, visible) instead of every property.
+- `compact` (boolean, default `false`): a table with one short row per object
+  (name, label, type, state, valid, parent, visible) instead of every
+  property as JSON.
 - `include_screenshot` (boolean, default `false`), `view_name`: see
   [screenshot options](#screenshot-options). The screenshot is off unless
   `include_screenshot` is passed as `true`.

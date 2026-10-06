@@ -45,3 +45,25 @@ def hide_sources(obj: Any, changed: Any) -> list[str]:
         return [source.Name]
     except Exception:
         return []
+
+
+def visibility_snapshot(doc: Any) -> dict[str, bool]:
+    """Name -> visibility of every object of ``doc`` that has a view object."""
+    shown = {}
+    for obj in doc.Objects:
+        view = getattr(obj, "ViewObject", None)
+        if view is None:
+            continue
+        try:
+            shown[obj.Name] = bool(view.Visibility)
+        except Exception:
+            pass
+    return shown
+
+
+def newly_hidden(doc: Any, before: dict[str, bool]) -> list[str]:
+    """The objects of ``doc`` that were visible in ``before`` and are hidden
+    now: FreeCAD's view providers hide the inputs of a boolean or a compound
+    when it is made, and the caller has to be told."""
+    after = visibility_snapshot(doc)
+    return [name for name, was in before.items() if was and after.get(name) is False]

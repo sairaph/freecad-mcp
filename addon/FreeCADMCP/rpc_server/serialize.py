@@ -238,6 +238,37 @@ def serialize_shape(shape):
     return result
 
 
+def shape_summary(shape):
+    """What a created or changed object's shape holds, for the reply of
+    create_object and update_object: ``{"null": True}`` for a null shape, else
+    the counts (solids, shells, faces, edges), the tight box size in mm (None
+    for an empty shape) and, with a solid, the volume in mm^3. None when the
+    shape cannot be read."""
+    if shape is None:
+        return None
+    try:
+        if shape.isNull():
+            return {"null": True}
+        faces = len(shape.Faces)
+        solids = len(shape.Solids)
+        result = {
+            "solids": solids,
+            "shells": len(shape.Shells),
+            "faces": faces,
+            "edges": len(shape.Edges),
+            "size": None,
+        }
+        box = tight_bound_box(shape)
+        if box.isValid():
+            result["size"] = [finite_or_none(v) for v in (box.XLength, box.YLength, box.ZLength)]
+        if solids:
+            volumes = _solid_volumes(shape, faces)
+            result["volume"] = finite_or_none(sum(volumes) if volumes is not None else shape.Volume)
+        return result
+    except Exception:
+        return None
+
+
 def serialize_view_object(view):
     if view is None:
         return None

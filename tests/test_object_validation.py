@@ -281,6 +281,7 @@ class FakeDocumentWithSource(FakeDocument):
     def __init__(self, obj: object, source: object):
         super().__init__(obj)
         self.source = source
+        self.Objects.append(source)
 
     def getObject(self, name: str) -> object | None:
         return self.source if name == self.source.Name else super().getObject(name)
@@ -331,3 +332,132 @@ def test_edit_object_lists_the_edges_and_hides_the_source_only_when_it_is_relink
 
     assert result["hidden"] == ["Outer"]
     assert source.ViewObject.Visibility is False
+
+
+class FakeShape:
+    def __init__(self, solids: int = 1, null: bool = False, volume: float = 9503.5):
+        self.Solids = [types.SimpleNamespace(Faces=[object()] * 6, Volume=volume / solids)] * solids if solids else []
+        self.Shells = [object()] * solids
+        self.Faces = [object()] * (6 * solids)
+        self.Edges = [object()] * (12 * solids)
+        self.Volume = volume
+        self.ShapeType = "Compound"
+        self._null = null
+        self.BoundBox = types.SimpleNamespace(
+            isValid=lambda: solids > 0, XLength=40.0, YLength=20.0, ZLength=12.0,
+            XMin=0.0, YMin=0.0, ZMin=0.0, XMax=40.0, YMax=20.0, ZMax=12.0,
+        )
+
+    def isNull(self) -> bool:
+        return self._null
+
+
+class FakeBoolean(FakeObject):
+    def __init__(self, type_id: str, shape: FakeShape, inputs: list):
+        super().__init__(Name="Clip", TypeId=type_id, Shape=shape)
+        self.Label = "Clip"
+        self.OutList = inputs
+        self.Base = inputs[0] if inputs else None
+        self.Tool = inputs[1] if len(inputs) > 1 else None
+        self.PropertiesList: list = []
+
+
+def shaped(name: str, solids: int = 1, visible: bool = True) -> FakeObject:
+    box = FakeObject(Name=name, Shape=FakeShape(solids))
+    box.ViewObject = types.SimpleNamespace(Visibility=visible)
+    return box
+
+
+def test_create_object_reports_the_shape_and_the_inputs_that_went_hidden() -> None:
+    block, hole = shaped("Block"), shaped("Hole")
+    clip = FakeBoolean("Part::Cut", FakeShape(), [block, hole])
+    doc = FakeDocument(clip)
+    doc.Objects.extend([block, hole])
+
+    class HidingDoc(FakeDocument):
+        def recompute(self) -> None:
+            block.ViewObject.Visibility = hole.ViewObject.Visibility = False
+
+    doc.__class__ = HidingDoc
+    with load_object_factory(doc) as object_factory:
+        result = object_factory.create_object_gui("Doc", object_factory.Object(name="Clip", type="Part::Cut", properties={}))
+
+    assert result["shape"] == {"solids": 1, "shells": 1, "faces": 6, "edges": 12, "size": [40.0, 20.0, 12.0], "volume": 9503.5}
+    assert result["hidden"] == ["Block", "Hole"]
+    assert "warning" not in result
+
+
+def test_a_result_without_a_solid_warns_when_an_input_has_one() -> None:
+    block, far = shaped("Block"), shaped("Far")
+    clip = FakeBoolean("Part::Common", FakeShape(solids=0), [block, far])
+    doc = FakeDocument(clip)
+
+    with load_object_factory(doc) as object_factory:
+        result = object_factory.create_object_gui("Doc", object_factory.Object(name="Clip", type="Part::Common", properties={}))
+        clip.TypeId = "Part::Section"
+        quiet = object_factory.edit_object_gui("Doc", object_factory.Object(name="Clip", properties={}))
+        clip.TypeId = "Part::Cut"
+        edit = object_factory.edit_object_gui("Doc", object_factory.Object(name="Clip", properties={}))
+
+    assert result["success"] is True
+    assert result["warning"] == "The result holds no solid: its inputs do not overlap. Check their Placement."
+    assert result["shape"]["solids"] == 0 and result["shape"]["size"] is None
+    assert "warning" not in quiet
+    assert "the tool removes all of the base" in edit["warning"]
+
+
+def test_no_warning_when_no_input_holds_a_solid_and_none_for_a_null_shape_summary() -> None:
+    sketch = FakeObject(Name="Sketch", Shape=FakeShape(solids=0))
+    wire = FakeBoolean("Part::Extrusion", FakeShape(solids=0), [sketch])
+    doc = FakeDocument(wire)
+    with load_object_factory(doc) as object_factory:
+        result = object_factory.create_object_gui("Doc", object_factory.Object(name="Clip", type="Part::Extrusion", properties={}))
+        wire.Shape = FakeShape(null=True)
+        nulled = object_factory.edit_object_gui("Doc", object_factory.Object(name="Clip", properties={}))
+    assert "warning" not in result
+    assert nulled["shape"] == {"null": True}
+
+
+def test_an_object_without_a_shape_has_no_shape_field() -> None:
+    sheet = FakeObject(Name="Sheet", TypeId="Spreadsheet::Sheet")
+    doc = FakeDocument(sheet)
+    with load_object_factory(doc) as object_factory:
+        result = object_factory.create_object_gui("Doc", object_factory.Object(name="Sheet", type="Spreadsheet::Sheet", properties={}))
+    assert "shape" not in result and "warning" not in result
+
+
+def test_a_feature_that_is_not_a_solid_boolean_never_warns_of_an_empty_result() -> None:
+    # A sketch attached to a box face and an extrusion with Solid false have a
+    # solid in their OutList and none in their shape, by design.
+    box = shaped("Box")
+    for type_id in ("Sketcher::SketchObject", "Part::Extrusion", "Draft::Wire"):
+        feature = FakeBoolean(type_id, FakeShape(solids=0), [box])
+        with load_object_factory(FakeDocument(feature)) as object_factory:
+            result = object_factory.edit_object_gui("Doc", object_factory.Object(name="Clip", properties={}))
+        assert result["success"] is True and "warning" not in result, type_id
+        assert result["shape"]["solids"] == 0
+
+
+def test_the_inputs_of_a_multi_boolean_and_a_fillet_are_read_from_their_own_properties() -> None:
+    box = shaped("Box")
+    multi = FakeBoolean("Part::MultiFuse", FakeShape(solids=0), [box])
+    multi.Shapes = [box]
+    fillet = FakeBoolean("Part::Fillet", FakeShape(solids=0), [box])
+    for feature in (multi, fillet):
+        with load_object_factory(FakeDocument(feature)) as object_factory:
+            result = object_factory.edit_object_gui("Doc", object_factory.Object(name="Clip", properties={}))
+        assert result["warning"].startswith("The result holds no solid"), feature.TypeId
+
+
+def test_an_empty_body_has_no_shape_but_a_feature_with_a_null_shape_keeps_it() -> None:
+    body = FakeBoolean("PartDesign::Body", FakeShape(null=True), [])
+    body.Group = []
+    with load_object_factory(FakeDocument(body)) as object_factory:
+        result = object_factory.create_object_gui("Doc", object_factory.Object(name="Clip", type="PartDesign::Body", properties={}))
+    assert result["success"] is True and "shape" not in result
+
+    cut = FakeBoolean("Part::Cut", FakeShape(null=True), [shaped("Block"), shaped("Hole")])
+    with load_object_factory(FakeDocument(cut)) as object_factory:
+        result = object_factory.create_object_gui("Doc", object_factory.Object(name="Clip", type="Part::Cut", properties={}))
+    assert result["shape"] == {"null": True}
+    assert "warning" in result
