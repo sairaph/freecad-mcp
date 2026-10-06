@@ -113,3 +113,26 @@ def analysis_loads(analysis: Any) -> list[dict[str, Any]]:
         if info is not None:
             loads.append(info)
     return loads
+
+
+#: The material properties a reply echoes, in the order it shows them.
+_MATERIAL_ECHO = ("YoungsModulus", "PoissonRatio", "Density")
+
+
+def material_info(obj: Any) -> dict[str, Any] | None:
+    """Describe the Material a FEM material object stores, as FreeCAD stored it,
+    or None for any other object: ``{"name", "text"}`` with the text "Material
+    Alu: YoungsModulus 70 GPa, PoissonRatio 0.33, Density 2700 kg/m^3" (only the
+    entries the material has)."""
+    try:
+        if "Material" not in obj.PropertiesList or not str(obj.TypeId).startswith(("Fem::", "App::MaterialObject")):
+            return None
+        material = obj.Material
+        if not isinstance(material, dict):
+            return None
+        parts = [f"{key} {material[key]}" for key in _MATERIAL_ECHO if str(material.get(key, "")).strip()]
+        name = str(material.get("Name", "")).strip() or str(obj.Name)
+        text = f"Material {name}: " + ", ".join(parts) if parts else f"Material {name}: no stiffness or density stored."
+        return {"name": str(obj.Name), "text": text}
+    except Exception:
+        return None

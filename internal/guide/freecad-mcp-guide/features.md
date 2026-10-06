@@ -21,6 +21,13 @@ Head sizes from the standards:
 - Keep the material file's minimum wall under a recess. When the part is thinner than the recess depth plus that wall, thicken the part around the screw, or use a shallower recess and tell the user the head stands proud by the difference. Never leave less than the minimum wall.
 - A recess or hole that opens sideways (its axis is horizontal in the print pose) is a horizontal hole: give the recess the same pointed top. Read Teardrop below.
 
+## Captive nuts
+
+Hex nuts, ISO 4032 (across flats / height in mm): M2 4 / 1.6, M2.5 5 / 2, M3 5.5 / 2.4, M4 7 / 3.2, M5 8 / 4.7, M6 10 / 5.2, M8 13 / 6.8.
+
+- A captive-nut pocket is a hexagonal prism: Part::Prism with Polygon 6 and Circumradius = (across flats / 2 + the material file's per-side allowance) / cos 30 degrees. For an M3 nut in PETG: (5.5 / 2 + 0.2) / 0.866 = 3.406.
+- Depth: the nut height + 0.2. Load the nut from the side or from the open face.
+
 ## D-shaft hole
 
 A motor shaft with a flat: build the hole tool as a cylinder intersected with a box, then cut it from the part.

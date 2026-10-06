@@ -24,7 +24,8 @@ Build each part of an assembly in its own App::Part, then move the Parts to asse
 
 ## Print layout
 
-- The assembly pose is not the print pose. Make the layout in a copy: save_document_as with copy true, open_document on the copy, then set each Part's Placement there so its lowest point is z 0 and the Parts are spaced out. The assembly document stays as it is. Save the copy or close it with discard_changes true.
+- The assembly pose is not the print pose. Make the layout in a copy, in this order: save_document_as with copy true, open_document on the copy, set each Part's Placement there so its lowest point is z 0 and the Parts are spaced out, save_document, then export. The assembly document stays as it is. Closing the copy with discard_changes loses the layout.
+- For a second identical part use an App::Link to the first, not a Part::Compound: a compound hides its inputs.
 - Or move the Parts in the one document, export, and move them back.
 - check_printability lists each Part as one part and warns when a Part floats, its lowest point above z 0.
 - export_document with per_object true, object_names the Parts, format step or stl and a folder as path writes one file for each Part. A .3mf of the Parts holds one object for each.

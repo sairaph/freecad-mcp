@@ -73,7 +73,7 @@ func partFacts(obj map[string]any) []string {
 }
 
 // sideMargins lists the margin to each plate edge, " (x 10 / 186, y 10 / 206)",
-// with the top as ", z max 24" when the build height was given, or "" when the
+// with the top as ", 24 mm of build height left" (or "exceeds the build height by 5 mm") when the build height was given, or "" when the
 // reply has none.
 func sideMargins(v any) string {
 	m, _ := v.(map[string]any)
@@ -92,8 +92,12 @@ func sideMargins(v any) string {
 	if len(parts) == 0 {
 		return ""
 	}
-	if top, ok := side("z_high"); ok {
-		parts = append(parts, "z max "+top)
+	if top, ok := number(m["z_high"]); ok {
+		if top < 0 {
+			parts = append(parts, fmt.Sprintf("exceeds the build height by %.4g mm", -top))
+		} else {
+			parts = append(parts, fmt.Sprintf("%.4g mm of build height left", top))
+		}
 	}
 	return " (" + strings.Join(parts, ", ") + ")"
 }

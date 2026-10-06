@@ -184,7 +184,7 @@ func (s *Server) listDocuments(ctx context.Context, _ *mcp.CallToolRequest, _ st
 				str(d, "name"), str(d, "label"), str(d, "file_name"),
 				boolField(d, "modified"), boolField(d, "active"), viewsSummary(d))
 		}
-		body.WriteString("\nCall list_objects or get_object with a doc_name to inspect one, activate_document " +
+		body.WriteString("\n* marks the active view.\nCall list_objects or get_object with a doc_name to inspect one, activate_document " +
 			"to switch the active document, or open_document / create_document to add another.")
 	}
 

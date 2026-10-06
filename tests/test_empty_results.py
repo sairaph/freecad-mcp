@@ -302,7 +302,7 @@ def test_verdicts_of_closed_documents_and_deleted_objects_are_dropped(monkeypatc
     freecad = types.ModuleType("FreeCAD")
     freecad.listDocuments = lambda: {"Open": document}
     monkeypatch.setitem(sys.modules, "FreeCAD", freecad)
-    empty_results._prune_verdicts()
+    empty_results.prune_missing(empty_results._verdicts)
     assert list(empty_results._verdicts) == [("Open", "Kept")]
     empty_results._verdicts.clear()
 

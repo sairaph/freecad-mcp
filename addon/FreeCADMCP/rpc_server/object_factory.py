@@ -23,12 +23,12 @@ import ObjectsFem
 from rpc_server.agent_log import agent_error, agent_warning
 from rpc_server.empty_results import empty_result
 from rpc_server.fem_mesh import changes_meshing, generate_mesh, is_gmsh, mesh_info
-from rpc_server.fem_loads import load_info
+from rpc_server.fem_loads import load_info, material_info
 from rpc_server import partdesign
 from rpc_server.property_mapper import FILLET_TYPES, Object, fillet_edges_text, quantity_values, reject_app_link, set_object_property
 from rpc_server.object_validation import failed_names, newly_failed_report, object_validity_error, stale_dependents
 from rpc_server.serialize import object_shape_summary
-from rpc_server.shape_changes import changed_shapes, snapshot
+from rpc_server.shape_changes import changed_shapes, remember_summaries, snapshot
 from rpc_server.source_visibility import hide_sources, newly_hidden, visibility_snapshot
 from rpc_server.transactions import active_document, transaction
 
@@ -370,6 +370,9 @@ def _shape_fields(obj: Any) -> dict[str, Any]:
         # "no geometry yet" is in the sketch fields; a null shape here reads as a failure.
         return {}
     summary = object_shape_summary(obj)
+    # The Body this object is the Tip of has the same shape, so the same summary.
+    twins = _reading("the Body of a Tip", lambda: [obj.Document.getObject(name) for name in _own_names(obj.Document, obj) if name != str(obj.Name)], [])
+    remember_summaries([(item, summary) for item in [obj, *twins] if item is not None])
     if summary is None:
         return {}
     if summary.get("null") and hasattr(obj, "Group") and not obj.Group:
@@ -526,7 +529,7 @@ def create_object_gui(doc_name: str, obj: Object):
             doc.recompute()
             problem = object_validity_error(created)
             quantities = _reading("the quantities", lambda: quantity_values(created, requested), {})
-            load = _reading("the load", lambda: load_info(created), None)
+            load = _reading("the load", lambda: load_info(created) or material_info(created), None)
             extra = _reading("the name and placement", lambda: _name_and_placement_fields(created, requested), {})
             if _reading("the mesh type", lambda: is_gmsh(created), False):
                 extra.update(_reading("the mesh", lambda: {"mesh": mesh_info(created)}, {}))
@@ -624,7 +627,7 @@ def edit_object_gui(doc_name: str, obj: Object):
                 doc.recompute()
                 problem = object_validity_error(obj_ins)
                 quantities = _reading("the quantities", lambda: quantity_values(obj_ins, obj.properties), {})
-                load = _reading("the load", lambda: load_info(obj_ins), None)
+                load = _reading("the load", lambda: load_info(obj_ins) or material_info(obj_ins), None)
                 extra = _reading("the name and placement", lambda: _name_and_placement_fields(obj_ins, list(obj.properties)), {})
                 extra.update(_partdesign_fields(obj_ins, plan))
                 if is_gmsh(obj_ins) and not problem and changes_meshing(obj_ins, obj.properties):
@@ -638,7 +641,9 @@ def edit_object_gui(doc_name: str, obj: Object):
                 if not problem:
                     _reading("which sources to hide", lambda: hide_sources(obj_ins, obj.properties), None)
                     extra.update(_reading("the shape", lambda: _shape_fields(obj_ins), {}))
-                    hidden = hidden_since(doc, shown)
+                    # The object itself cannot go hidden as a consequence of its own update: it is the Visibility the caller set
+                    # (as a property or as {"ViewObject": {"Visibility": false}}).
+                    hidden = [name for name in hidden_since(doc, shown) if name != str(obj_ins.Name)]
                     if hidden:
                         extra["hidden"] = hidden
                 collateral = collateral_report(doc, before, obj_ins)

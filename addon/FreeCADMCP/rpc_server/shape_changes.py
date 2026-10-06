@@ -16,6 +16,7 @@ from typing import Any
 from rpc_server.agent_log import agent_warning
 from rpc_server.object_validation import MAX_LISTED_OBJECTS
 from rpc_server.serialize import object_shape_summary
+from rpc_server.empty_results import prune_missing
 from rpc_server.tessellation import parent_map
 
 
@@ -42,6 +43,41 @@ def snapshot(doc: Any) -> dict[str, int | None] | None:
         return None
 
 
+#: The last summary the tool computed for each object, by (document, object), in
+#: the rounding the Shape line shows. An object whose shape was rebuilt to a
+#: summary equal to its stored one is not news; one with no stored summary is.
+_summaries: dict[tuple[str, str], tuple] = {}
+
+
+def _displayed(summary: dict[str, Any]) -> tuple:
+    """``summary`` as the Shape line shows it: the counts, the size to 0.01 mm
+    and the volume to 0.1 mm^3."""
+    size = summary.get("size")
+    volume = summary.get("volume")
+    return (
+        summary.get("solids"), summary.get("shells"), summary.get("faces"), summary.get("edges"),
+        None if size is None else tuple(round(v, 2) if v is not None else None for v in size),
+        None if volume is None else round(volume, 1),
+        bool(summary.get("null")),
+    )
+
+
+def _key(obj: Any) -> tuple[str, str]:
+    return (str(getattr(getattr(obj, "Document", None), "Name", "")), str(obj.Name))
+
+
+def remember_summaries(items: list[tuple[Any, dict[str, Any] | None]]) -> None:
+    """Keep each summary (what a reply just showed for its object) for the next
+    comparison. Entries of closed documents and deleted objects are dropped
+    first, once for the whole list, so they go the next time one is stored."""
+    items = [(obj, summary) for obj, summary in items if summary is not None]
+    if not items:
+        return
+    prune_missing(_summaries)
+    for obj, summary in items:
+        _summaries[_key(obj)] = _displayed(summary)
+
+
 def _top_shaped(doc: Any, obj: Any, parents: dict[str, str]) -> str:
     """The Name of the highest object above ``obj`` (itself included) that has a
     shape: a Body for its feature, a Cut for its input, the top-level object
@@ -58,10 +94,12 @@ def _top_shaped(doc: Any, obj: Any, parents: dict[str, str]) -> str:
 def changed_shapes(doc: Any, before: dict[str, int | None] | None, exclude: Any = ()) -> dict[str, Any]:
     """``{"changed_shapes": [{"name", "shape"}], "changed_shapes_count",
     "changed_shapes_truncated"}`` for the topmost shaped objects whose shape changed
-    since ``before`` (an object that is new counts), or ``{}`` when none did
-    or it could not be read. ``exclude`` names objects to leave out, such as
-    the one a create_object or update_object call is about, which has its own
-    Shape line."""
+    since ``before`` (an object that is new counts), or ``{}`` when none did or
+    it could not be read. An object whose new summary, as the Shape line shows
+    it, equals the last one the tool computed for it was rebuilt to the same
+    geometry and is left out; one the tool never summarised is listed.
+    ``exclude`` names objects to leave out, such as the one a create_object or
+    update_object call is about, which has its own Shape line."""
     if before is None:
         return {}
     try:
@@ -76,15 +114,25 @@ def changed_shapes(doc: Any, before: dict[str, int | None] | None, exclude: Any 
         parents = parent_map(doc)
         reported = {name for name in (_top_shaped(doc, obj, parents) for obj in changed.values()) if name in changed}
         rows = []
+        remembered = []
         count = 0
         for obj in doc.Objects:
             if str(obj.Name) not in reported:
                 continue
+            if len(rows) >= MAX_LISTED_OBJECTS:
+                # Past the cap nothing more is shown, so nothing more is summarised: the rest are counted.
+                count += 1
+                continue
+            summary = object_shape_summary(obj)
+            if summary is None:
+                continue
+            remembered.append((obj, summary))
+            stored = _summaries.get(_key(obj))
+            if stored is not None and stored == _displayed(summary):
+                continue
             count += 1
-            if len(rows) < MAX_LISTED_OBJECTS:
-                summary = object_shape_summary(obj)
-                if summary is not None:
-                    rows.append({"name": str(obj.Name), "shape": summary})
+            rows.append({"name": str(obj.Name), "shape": summary})
+        remember_summaries(remembered)
         if not count:
             return {}
         return {"changed_shapes": rows, "changed_shapes_count": count, "changed_shapes_truncated": count > len(rows)}

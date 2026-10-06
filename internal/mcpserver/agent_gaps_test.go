@@ -129,7 +129,7 @@ func TestPrintabilityShowsTheMarginToEachSide(t *testing.T) {
 		},
 	})
 	text := replyText(call(t, session(t, settingsFor(fc)), "check_printability", map[string]any{"doc_name": "D", "bed_x": 220, "bed_y": 220, "bed_z": 30}))
-	if !strings.Contains(text, "free margin to the plate edges 10 mm (x 10 / 186, y 10 / 206, z max 24.5)") {
+	if !strings.Contains(text, "free margin to the plate edges 10 mm (x 10 / 186, y 10 / 206, 24.5 mm of build height left)") {
 		t.Errorf("reply = %s", text)
 	}
 }

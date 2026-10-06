@@ -47,6 +47,15 @@ Design rules for FDM parts in PLA with a 0.4 mm nozzle. Sizes in mm. "Per side" 
 - Bridges up to 10 print cleanly; beyond that add a rib or chamfer the roof at 45 degrees.
 - Outer edges rounded or chamfered at least 0.5; inside corners radius at least 0.5, since PLA cracks from sharp inside corners.
 
+## FEM
+
+- Use the brand's datasheet when the user has one. Otherwise, for a solid (100 % infill) PLA part, isotropic: {"Name": "PLA", "YoungsModulus": "2.3 GPa", "PoissonRatio": 0.36, "Density": "1240 kg/m^3"}. The Poisson's ratio is assumed.
+- Strength: about 51 MPa along the layers and about 40 MPa across them at best. These are best-case datasheet values; a real part is weaker across layers.
+- Check the stress against strength divided by a safety factor of 2 to 3 along the layers and 4 or more where the load pulls layers apart.
+- Linear FEM shows neither creep nor heat softening. A part held under load for long, or near PLA's softening (55 to 60 C), needs margin beyond the result.
+- Sparse infill: these numbers do not apply. Check only the walls, or ask for solid infill.
+- The result is a check, not a guarantee. Read fem.md.
+
 ## Test coupon
 
 Print these small samples on the user's printer before large parts, then set the Params cells to the ones that fit best:
