@@ -422,3 +422,90 @@ def test_a_record_that_cannot_be_compared_falls_back_on_the_node_box(fem_mesh) -
 def test_the_record_property_is_one_the_serializer_leaves_out(fem_mesh) -> None:
     serialize_path = ADDON / "rpc_server" / "serialize.py"
     assert f'INTERNAL_PROPERTIES = frozenset({{"{fem_mesh.FINGERPRINT_PROPERTY}"}})' in serialize_path.read_text(encoding="utf-8")
+
+
+def test_a_constraint_on_another_object_than_the_meshed_one_is_found_before_solving(monkeypatch) -> None:
+    executor = load_fem_executor(monkeypatch)
+    bar = types.SimpleNamespace(Name="Bar")
+    cut = types.SimpleNamespace(Name="HoleBar")
+    mesh = MeshObject(cut)
+    load = types.SimpleNamespace(Name="Load", References=[(bar, ["Face6"])])
+    fixed = types.SimpleNamespace(Name="Fixed", References=[(cut, ["Face1"])])
+    analysis = types.SimpleNamespace(Group=[mesh, fixed, load, types.SimpleNamespace(Name="Alu")])
+    assert executor.references_off_the_mesh(analysis) == [("Load", "Bar", "Mesh", "HoleBar")]
+    load.References = [(cut, ["Face6"])]
+    assert executor.references_off_the_mesh(analysis) == []
+
+
+def test_a_reference_to_the_tip_or_a_member_of_the_meshed_body_is_the_same_solid(monkeypatch) -> None:
+    executor = load_fem_executor(monkeypatch)
+    pad = types.SimpleNamespace(Name="Pad")
+    fillet = types.SimpleNamespace(Name="Fillet")
+    body = types.SimpleNamespace(Name="Body", Tip=fillet, Group=[pad, fillet])
+    load = types.SimpleNamespace(Name="Load", References=[(fillet, ["Face6"])])
+    other = types.SimpleNamespace(Name="Other", References=[(pad, ["Face1"])])
+    analysis = types.SimpleNamespace(Group=[MeshObject(body), load, other])
+    assert executor.references_off_the_mesh(analysis) == []
+    stray = types.SimpleNamespace(Name="Stray", References=[(types.SimpleNamespace(Name="Bar"), ["Face1"])])
+    analysis.Group.append(stray)
+    assert executor.references_off_the_mesh(analysis) == [("Stray", "Bar", "Mesh", "Body")]
+
+
+def test_an_analysis_without_a_mesh_or_references_is_left_to_the_prerequisite_check(monkeypatch) -> None:
+    executor = load_fem_executor(monkeypatch)
+    load = types.SimpleNamespace(Name="Load", References=[(types.SimpleNamespace(Name="Bar"), ["Face6"])])
+    assert executor.references_off_the_mesh(types.SimpleNamespace(Group=[load])) == []
+    mesh = MeshObject(None)
+    mesh.Shape = None
+    assert executor.references_off_the_mesh(types.SimpleNamespace(Group=[mesh, load])) == []
+    assert executor.references_off_the_mesh(types.SimpleNamespace(Group=[MeshObject(shape_object("Bar")), types.SimpleNamespace(Name="Alu")])) == []
+
+
+class CountingNodes:
+    """FemMesh.Nodes rebuilds its table on every access; this counts them."""
+
+    def __init__(self, nodes):
+        self.nodes, self.reads = nodes, 0
+
+    @property
+    def Nodes(self):
+        self.reads += 1
+        return self.nodes
+
+
+def test_the_peak_positions_are_the_nodes_of_the_largest_values_read_with_one_nodes_access(monkeypatch) -> None:
+    executor = load_fem_executor(monkeypatch)
+    point = lambda x, y, z: types.SimpleNamespace(x=x, y=y, z=z)
+    femmesh = CountingNodes({11: point(0, 0, 0), 12: point(30, 7.5, 8), 13: point(60.0000001, 7.5, 4)})
+    result = types.SimpleNamespace(NodeNumbers=[11, 12, 13], Mesh=types.SimpleNamespace(FemMesh=femmesh))
+    found = executor._peak_positions(result, [1.0, 223.3, 5.0], [0.0, 0.1, 0.48])
+    assert found == {"max_von_mises_at": [30, 7.5, 8], "max_displacement_at": [60, 7.5, 4]}
+    assert femmesh.reads == 1
+
+
+def test_peak_positions_are_left_out_when_the_result_cannot_be_matched_to_nodes(monkeypatch) -> None:
+    executor = load_fem_executor(monkeypatch)
+    femmesh = CountingNodes({1: types.SimpleNamespace(x=1, y=2, z=3)})
+    result = types.SimpleNamespace(NodeNumbers=[1, 2], Mesh=types.SimpleNamespace(FemMesh=femmesh))
+    assert executor._peak_positions(result, [1.0], [1.0, 2.0]) == {}
+    assert executor._peak_positions(types.SimpleNamespace(NodeNumbers=[], Mesh=None), [1.0], [1.0]) == {}
+    assert executor._peak_positions(types.SimpleNamespace(), [], []) == {}
+
+
+def test_the_children_of_a_compound_are_the_same_solid(monkeypatch) -> None:
+    executor = load_fem_executor(monkeypatch)
+    block = types.SimpleNamespace(Name="Block")
+    first, second = types.SimpleNamespace(Name="First"), types.SimpleNamespace(Name="Second")
+    compound = types.SimpleNamespace(Name="Both", Links=[first, second])
+    on_child = types.SimpleNamespace(Name="Fixed", References=[(second, ["Face1"])])
+    assert executor.references_off_the_mesh(types.SimpleNamespace(Group=[MeshObject(compound), on_child])) == []
+    stray = types.SimpleNamespace(Name="Stray", References=[(block, ["Face1"])])
+    assert executor.references_off_the_mesh(types.SimpleNamespace(Group=[MeshObject(compound), stray])) == [("Stray", "Block", "Mesh", "Both")]
+
+
+def test_the_inputs_of_a_cut_are_still_refused(monkeypatch) -> None:
+    executor = load_fem_executor(monkeypatch)
+    base, tool = types.SimpleNamespace(Name="Bar"), types.SimpleNamespace(Name="Hole")
+    cut = types.SimpleNamespace(Name="HoleBar", Base=base, Tool=tool)
+    load = types.SimpleNamespace(Name="Load", References=[(base, ["Face1"])])
+    assert executor.references_off_the_mesh(types.SimpleNamespace(Group=[MeshObject(cut), load])) == [("Load", "Bar", "Mesh", "HoleBar")]

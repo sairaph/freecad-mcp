@@ -428,6 +428,19 @@ func featureNote(body string, res map[string]any) string {
 	if edges := stringItems(res["edges"]); len(edges) > 0 {
 		body += "\n\nEdges now: " + strings.Join(edges, ", ") + "."
 	}
+	if b, ok := res["body"].(map[string]any); ok {
+		body += fmt.Sprintf("\n\nIn Body '%s'", str(b, "name"))
+		if tip := str(b, "tip"); tip != "" {
+			body += fmt.Sprintf(" (Tip: %s)", tip)
+		}
+		body += "."
+	}
+	if sketch, ok := res["sketch"].(map[string]any); ok {
+		body += "\n\n" + sketchText(sketch)
+	}
+	for _, note := range stringItems(res["notes"]) {
+		body += "\n\nNote: " + note
+	}
 	if hidden := stringItems(res["hidden"]); len(hidden) > 0 {
 		body += fmt.Sprintf("\n\nHidden: %s (inputs of %s).",
 			strings.Join(hidden, ", "), str(res, "object_name"))
@@ -701,6 +714,24 @@ func argumentProblem(err error) string {
 	}
 	msg = strings.TrimPrefix(msg, "json: ")
 	return msg
+}
+
+// sketchText says what a sketch holds: its geometry count and whether it is a
+// closed profile, which a Pad or Pocket needs.
+func sketchText(sketch map[string]any) string {
+	n := intField(sketch, "geometry_count")
+	if n == 0 {
+		return "Sketch: no geometry yet."
+	}
+	noun := "elements"
+	if n == 1 {
+		noun = "element"
+	}
+	profile := "open profile"
+	if boolField(sketch, "closed") {
+		profile = "closed profile"
+	}
+	return fmt.Sprintf("Sketch: %d geometry %s, %s.", n, noun, profile)
 }
 
 // shapeText describes the shape block of a create or update reply: the solid

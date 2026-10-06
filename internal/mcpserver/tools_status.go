@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"strconv"
 	"strings"
 	"time"
 
@@ -552,11 +553,29 @@ func (s *Server) runFEMAnalysis(ctx context.Context, _ *mcp.CallToolRequest, in 
 	if n, ok := res["node_count"].(int64); ok {
 		front.NodeCount = &n
 	}
-	res["summary"] = fmt.Sprintf("FEM analysis '%s' solved. max von Mises = %s, max displacement = %s (%v nodes%s).",
-		in.AnalysisName, formatMeasure(res["max_von_mises_MPa"], "MPa"), formatMeasure(res["max_displacement_mm"], "mm"), res["node_count"], femOrderText(res))
+	res["summary"] = fmt.Sprintf("FEM analysis '%s' solved. max von Mises = %s%s, max displacement = %s%s (%v nodes%s).",
+		in.AnalysisName, formatMeasure(res["max_von_mises_MPa"], "MPa"), femAtText(res["max_von_mises_at"]),
+		formatMeasure(res["max_displacement_mm"], "mm"), femAtText(res["max_displacement_at"]), res["node_count"], femOrderText(res))
 	body := transactionNote(res["summary"].(string)+femMeshText(res)+femLoadsText(res)+femColourText(res)+"\n\n"+jsonBlock(res), txName, txMerged)
 	out := render.SuccessResult(front, body)
 	return s.withNotice(s.screenshot(ctx, conn, out, in.IncludeScreenshot, viewString(in.ViewName), in.DocName)), nil, nil
+}
+
+// femAtText is " at (x, y, z)" (mm) for a peak position the addon found, else "".
+func femAtText(v any) string {
+	point, _ := v.([]any)
+	if len(point) != 3 {
+		return ""
+	}
+	coords := make([]string, 3)
+	for i, item := range point {
+		f, ok := number(item)
+		if !ok {
+			return ""
+		}
+		coords[i] = strconv.FormatFloat(math.Round(f*100)/100, 'f', -1, 64)
+	}
+	return " at (" + strings.Join(coords, ", ") + ")"
 }
 
 // femOrderText is ", 2nd order" for the summary line when the run's solid mesh

@@ -3,7 +3,7 @@ name: freecad-mcp-guide
 description: Workflows and rules for the freecad MCP server's tools. Use when building or changing FreeCAD models through create_object and update_object, choosing faces or edges with list_subelements, setting values with units or expressions, setting up and running a FEM analysis, checking and exporting parts for 3D printing, designing printed fits, threads and clips for a print material such as PETG or PLA, working with files on the FreeCAD computer, or sharing one FreeCAD with other agents.
 metadata:
   generator: freecad-mcp
-  version: "0.4.18"
+  version: "0.4.19"
 ---
 
 # FreeCAD MCP guide
@@ -35,7 +35,7 @@ Call the tools of the freecad server by their bare names, such as create_object.
 
 Build a part:
 1. For a part that will be 3D printed and has holes, fits, threads or clips, read the material file for its material first, such as material-petg.md, and features.md for screw head recesses, cable channels and edges to round. Ask for the material when it is not known.
-2. create_object for each solid, with Placement and dimensions in obj_properties.
+2. create_object for each solid, with Placement and dimensions in obj_properties. For a part made of sketches, pads and pockets read partdesign.md and build it in a Body.
 3. create_object for booleans such as Part::Cut with Base and Tool as object names.
 4. recompute_document after a series of changes. Fix each failed object with update_object.
 5. get_object to check values. get_view to look at the result.
@@ -74,6 +74,7 @@ Each file named here sits in the same folder as this SKILL.md (the folder freeca
 
 - values.md: quantities, units, expressions, links, Placement, colors, triangle and polygon primitives. Read before any create_object or update_object that sets more than a plain length.
 - subelements.md: choosing faces and edges. Read before measure or a FEM constraint.
+- partdesign.md: Body, sketches with Geometry and AttachmentSupport, Pad, Pocket, Fillet, Chamfer, body_name, Tip, and when to use Part instead. Read before the first PartDesign object or sketch.
 - fem.md: FEM from analysis to result. Read before the first FEM object.
 - files.md: paths, formats, import, export, save. Read before touching a file.
 - session.md: remote access, holding and releasing FreeCAD. Read when a call is refused as in use, or when get_rpc_status shows a holder.

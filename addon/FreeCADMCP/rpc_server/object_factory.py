@@ -6,7 +6,9 @@
 names), ``_create_fem_object`` for the other ``Fem::`` types,
 ``_create_python_object`` for the Python-implemented types that have a
 factory here (``Part::Tube`` and the Draft shapes), and
-``_create_generic_object`` for any type registered with ``doc.addObject``.
+``_create_generic_object`` for any type registered with ``doc.addObject``;
+PartDesign features and sketches for a Body are made in their Body there
+(``partdesign.plan_create`` chooses it).
 ``edit_object_gui`` sets properties on an existing object. Both check the
 object after recompute and report the actual object name.
 """
@@ -22,7 +24,8 @@ from rpc_server.agent_log import agent_error, agent_warning
 from rpc_server.empty_results import empty_result
 from rpc_server.fem_mesh import changes_meshing, generate_mesh, is_gmsh, mesh_info
 from rpc_server.fem_loads import load_info
-from rpc_server.property_mapper import FILLET_TYPES, Object, fillet_edges_text, quantity_values, set_object_property
+from rpc_server import partdesign
+from rpc_server.property_mapper import FILLET_TYPES, Object, fillet_edges_text, quantity_values, reject_app_link, set_object_property
 from rpc_server.object_validation import failed_names, newly_failed_report, object_validity_error, stale_dependents
 from rpc_server.serialize import shape_summary
 from rpc_server.source_visibility import hide_sources, newly_hidden, visibility_snapshot
@@ -53,6 +56,7 @@ def _create_fem_mesh(doc: FreeCAD.Document, obj: Object):
         raise ValueError(f"Referenced object '{obj.properties[geom_key]}' not found.")
     if geom_attr is None:
         raise ValueError("Mesh object has neither 'Shape' nor 'Part' property.")
+    reject_app_link(target_obj, "Shape")
     setattr(res, geom_attr, target_obj)
     del obj.properties[geom_key]
 
@@ -237,7 +241,7 @@ def _unregistered_type_message(obj_type: str) -> str:
     )
 
 
-def _create_generic_object(doc: FreeCAD.Document, obj: Object):
+def _create_generic_object(doc: FreeCAD.Document, obj: Object, plan: partdesign.Plan):
     if obj.type in FILLET_TYPES and not ("Base" in obj.properties and "Edges" in obj.properties):
         # Without edges FreeCAD cannot compute it ("no suitable edges"), so an object
         # made bare would only stay behind broken.
@@ -247,13 +251,25 @@ def _create_generic_object(doc: FreeCAD.Document, obj: Object):
             f'{{"Base": "Box", "Edges": ["Edge1", "Edge2"], "{size}": 1}}; '
             "call list_subelements with kind edges to see the edge names."
         )
+    if obj.type in partdesign.DRESSUPS and not (
+        isinstance(plan.properties.get("Base"), (list, tuple, dict)) or plan.properties.get("UseAllEdges")
+    ):
+        raise ValueError(
+            f"{obj.type} needs Base and Edges in obj_properties, for example "
+            f'{{"Base": "Pad", "Edges": ["Edge1", "Edge2"], "{partdesign.DRESSUPS[obj.type]}": 1}}; '
+            "call list_subelements with kind edges to see the edge names."
+        )
     try:
-        res = doc.addObject(obj.type, obj.name)
+        # A feature goes in its Body the way FreeCAD's own commands put it
+        # there, which also sets BaseFeature and Tip.
+        res = plan.body.newObject(obj.type, obj.name) if plan.body is not None else doc.addObject(obj.type, obj.name)
     except Exception as e:
         if "not a document object type" in str(e):
             raise ValueError(_unregistered_type_message(obj.type)) from e
         raise
-    set_object_property(doc, res, obj.properties)
+    set_object_property(doc, res, plan.properties)
+    if plan.geometry is not None:
+        partdesign.set_geometry(res, plan.geometry)
     FreeCAD.Console.PrintMessage(
         f"{res.TypeId} '{res.Name}' added to '{doc.Name}' via RPC.\n"
     )
@@ -313,7 +329,7 @@ def _name_and_placement_fields(obj: Any, requested: list) -> dict[str, Any]:
     properties set was (part of) it, and the edges of a fillet or chamfer."""
     fields: dict[str, Any] = {}
     try:
-        edges = fillet_edges_text(obj, requested)
+        edges = fillet_edges_text(obj, requested) or partdesign.dressup_edges_text(obj, requested)
         if edges:
             fields["edges"] = edges
     except Exception:
@@ -349,6 +365,9 @@ def _shape_fields(obj: Any) -> dict[str, Any]:
     to report."""
     if getattr(obj, "Shape", None) is None:
         return {}
+    if obj.TypeId == partdesign.SKETCH_TYPE and getattr(obj, "GeometryCount", None) == 0:
+        # "no geometry yet" is in the sketch fields; a null shape here reads as a failure.
+        return {}
     summary = shape_summary(obj.Shape)
     if summary is None:
         return {}
@@ -358,6 +377,33 @@ def _shape_fields(obj: Any) -> dict[str, Any]:
     found = empty_result(obj, summary.get("volume"))
     if found is not None:
         fields["warning"] = found[0]
+    return fields
+
+
+def _reading(what: str, read, default):
+    """``read()``, or ``default`` when it raises: the reply fields are extra
+    information, and a reader that fails (an odd object, a FreeCAD error) logs
+    a warning and drops its field instead of failing the user's change."""
+    try:
+        return read()
+    except Exception as e:
+        agent_warning(f"MCP RPC: could not read {what}: {type(e).__name__}: {e}\n")
+        return default
+
+
+def _partdesign_fields(created: Any, plan: partdesign.Plan) -> dict[str, Any]:
+    """The reply fields of a PartDesign call: the Body a new object went into
+    and its Tip, what a sketch holds, and the notes about forms that were mapped."""
+    fields: dict[str, Any] = {}
+    try:
+        if plan.body is not None:
+            fields.update(partdesign.body_fields(plan.body))
+        if created.TypeId == partdesign.SKETCH_TYPE:
+            fields.update(partdesign.sketch_fields(created))
+    except Exception as e:
+        agent_warning(f"MCP RPC: could not read the PartDesign state: {type(e).__name__}: {e}\n")
+    if plan.notes:
+        fields["notes"] = plan.notes
     return fields
 
 
@@ -447,6 +493,7 @@ def create_object_gui(doc_name: str, obj: Object):
             before = failed_before(doc)
             shown = shown_before(doc)
             requested = list(obj.properties)
+            plan = partdesign.Plan()
             try:
                 if obj.type == "Fem::FemMeshGmsh":
                     created = _create_fem_mesh(doc, obj)
@@ -455,21 +502,23 @@ def create_object_gui(doc_name: str, obj: Object):
                 elif obj.type in _PYTHON_FACTORIES:
                     created = _create_python_object(doc, obj)
                 else:
-                    created = _create_generic_object(doc, obj)
+                    plan = partdesign.plan_create(doc, obj.type, obj.properties, obj.body)
+                    created = _create_generic_object(doc, obj, plan)
             except Exception as e:
                 return _creation_failure(doc, tx, existing, e)
 
             _keep_requested_label(created, obj.name)
             doc.recompute()
             problem = object_validity_error(created)
-            quantities = quantity_values(created, requested)
-            load = load_info(created)
-            extra = _name_and_placement_fields(created, requested)
-            if is_gmsh(created):
-                extra["mesh"] = mesh_info(created)
+            quantities = _reading("the quantities", lambda: quantity_values(created, requested), {})
+            load = _reading("the load", lambda: load_info(created), None)
+            extra = _reading("the name and placement", lambda: _name_and_placement_fields(created, requested), {})
+            if _reading("the mesh type", lambda: is_gmsh(created), False):
+                extra.update(_reading("the mesh", lambda: {"mesh": mesh_info(created)}, {}))
+            extra.update(_partdesign_fields(created, plan))
             if not problem:
-                hide_sources(created, None)
-                extra.update(_shape_fields(created))
+                _reading("which sources to hide", lambda: hide_sources(created, None), None)
+                extra.update(_reading("the shape", lambda: _shape_fields(created), {}))
                 hidden = hidden_since(doc, shown)
                 if hidden:
                     extra["hidden"] = hidden
@@ -496,6 +545,29 @@ def create_object_gui(doc_name: str, obj: Object):
         return str(e)
 
 
+def _update_failure(doc: FreeCAD.Document, tx, error: Exception, meshing: bool = False) -> str:
+    """Undo an update that raised and return the error text for the caller.
+
+    The call's own transaction is aborted, which restores every property it
+    set and leaves no undo step; the document is recomputed so nothing is
+    left touched. When the call joined a transaction that was already open
+    (aborting would discard the user's own edit) nothing is rolled back and
+    the message does not claim it.
+    """
+    message = str(error).strip().rstrip(".") or type(error).__name__
+    if not tx.opened:
+        return message
+    try:
+        tx.abort()
+        doc.recompute()
+    except Exception as e:
+        agent_warning(f"MCP RPC: could not discard transaction '{tx.name}': {type(e).__name__}: {e}\n")
+        return message
+    if meshing:
+        return f"{message}. Nothing was changed; the mesh itself may hold a partial result: run_fem_analysis remeshes it."
+    return f"{message}. Nothing was changed."
+
+
 def edit_object_gui(doc_name: str, obj: Object):
     """Apply properties to an existing object and verify the recomputed state."""
     try:
@@ -514,28 +586,45 @@ def edit_object_gui(doc_name: str, obj: Object):
     try:
         # See create_object_gui: hold doc active for the transaction's whole
         # life so FreeCAD does not open an empty linked transaction elsewhere.
+        meshing = False  # True while the mesh is being generated
         with active_document(doc), transaction("update_object") as tx:
-            before = failed_before(doc)
-            shown = shown_before(doc)
-            set_object_property(doc, obj_ins, obj.properties)
-            doc.recompute()
-            problem = object_validity_error(obj_ins)
-            quantities = quantity_values(obj_ins, obj.properties)
-            load = load_info(obj_ins)
-            extra = _name_and_placement_fields(obj_ins, list(obj.properties))
-            if is_gmsh(obj_ins) and not problem and changes_meshing(obj_ins, obj.properties):
-                # The mesh does not follow its solid or its parameters by
-                # itself: mesh again, as create_object does.
-                nodes_before = obj_ins.FemMesh.NodeCount
-                generate_mesh(obj_ins)
-                extra["mesh"] = {**mesh_info(obj_ins), "remeshed_from_nodes": int(nodes_before)}
-            if not problem:
-                hide_sources(obj_ins, obj.properties)
-                extra.update(_shape_fields(obj_ins))
-                hidden = hidden_since(doc, shown)
-                if hidden:
-                    extra["hidden"] = hidden
-            collateral = collateral_report(doc, before, obj_ins)
+            try:
+                before = failed_before(doc)
+                shown = shown_before(doc)
+                plan = partdesign.plan_update(doc, obj_ins, obj.properties)
+                set_object_property(doc, obj_ins, plan.properties)
+                if plan.geometry is not None:
+                    replaced = int(getattr(obj_ins, "ConstraintCount", 0))
+                    partdesign.set_geometry(obj_ins, plan.geometry)
+                    if replaced:
+                        plan.notes.append(
+                            f"Replaced the geometry and its {replaced} constraint{'s' if replaced != 1 else ''}."
+                        )
+                doc.recompute()
+                problem = object_validity_error(obj_ins)
+                quantities = _reading("the quantities", lambda: quantity_values(obj_ins, obj.properties), {})
+                load = _reading("the load", lambda: load_info(obj_ins), None)
+                extra = _reading("the name and placement", lambda: _name_and_placement_fields(obj_ins, list(obj.properties)), {})
+                extra.update(_partdesign_fields(obj_ins, plan))
+                if is_gmsh(obj_ins) and not problem and changes_meshing(obj_ins, obj.properties):
+                    # The mesh does not follow its solid or its parameters by
+                    # itself: mesh again, as create_object does.
+                    nodes_before = obj_ins.FemMesh.NodeCount
+                    meshing = True
+                    generate_mesh(obj_ins)
+                    meshing = False
+                    extra.update(_reading("the mesh", lambda: {"mesh": {**mesh_info(obj_ins), "remeshed_from_nodes": int(nodes_before)}}, {}))
+                if not problem:
+                    _reading("which sources to hide", lambda: hide_sources(obj_ins, obj.properties), None)
+                    extra.update(_reading("the shape", lambda: _shape_fields(obj_ins), {}))
+                    hidden = hidden_since(doc, shown)
+                    if hidden:
+                        extra["hidden"] = hidden
+                collateral = collateral_report(doc, before, obj_ins)
+            except Exception as e:
+                # transaction() commits on exit even when the block raises: discard it so a
+                # valid property set beside a bad one is not left applied.
+                return _update_failure(doc, tx, e, meshing)
         # Commits above regardless of problem, so a property change that left
         # the object invalid stays applied; undo reverts it.
         if problem:

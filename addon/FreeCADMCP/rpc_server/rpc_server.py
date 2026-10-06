@@ -156,6 +156,22 @@ def _err(res) -> dict:
     return {"success": False, "error": str(res)}
 
 
+def _count_commit(job_id: str | None, value: Any) -> None:
+    """Count a finished commit() on its job and keep the repr of what it
+    returned (cut short), so get_async_status shows the commit happened."""
+    try:
+        text = repr(value)
+    except Exception:
+        text = "<repr failed>"
+    if len(text) > 200:
+        text = text[:200] + "…"
+    with _ASYNC_JOBS_LOCK:
+        job = _ASYNC_JOBS.get(job_id)
+        if job is not None:
+            job["commits"] = job.get("commits", 0) + 1
+            job["last_commit"] = text
+
+
 def _commit_async(fn: Callable[[], Any], timeout: float = 120) -> Any:
     """Run an async script's document/view writes on the GUI thread."""
     if not getattr(_async_execution, "active", False):
@@ -172,6 +188,7 @@ def _commit_async(fn: Callable[[], Any], timeout: float = 120) -> Any:
 
     res = dispatch_to_gui(task, timeout=timeout, operation_name="async_commit")
     if isinstance(res, tuple):
+        _count_commit(getattr(_async_execution, "job", None), res[0])
         return res[0]
     error = _err(res)
     raise RuntimeError(f"commit() failed: {error['error']}")
@@ -538,6 +555,7 @@ class FreeCADRPC:
             name=obj_data.get("Name", "New_Object"),
             type=obj_data["Type"],
             analysis=obj_data.get("Analysis", None),
+            body=obj_data.get("Body", None),
             properties=obj_data.get("Properties", {}),
         )
         # create_object_gui reports the created object's actual Name (see
@@ -677,6 +695,7 @@ class FreeCADRPC:
             # would restore stale values and lose deletions/concurrent writes.
             request_context.set(caller_ctx.session, caller_ctx.client, caller_ctx.ip)
             _async_execution.active = True
+            _async_execution.job = job_id
             try:
                 from rpc_server import agent_overlay
 
@@ -700,6 +719,7 @@ class FreeCADRPC:
                 }
             finally:
                 del _async_execution.active
+                del _async_execution.job
                 # Publish the result before best-effort logging, so a failing
                 # log call cannot hide the script's outcome from the client.
                 _record_job(job_id, finished=time.time(), **outcome)

@@ -626,3 +626,13 @@ def test_scripts_and_job_queries_do_not_scan_unrelated_documents(rpc_module: typ
     job_id = rpc.execute_code_async("value += 1")["job_id"]
     assert wait_for_job(rpc, job_id)["state"] == "done"
     assert rpc.execute_code("print(value)")["message"].endswith("43\n")
+
+
+def test_get_async_status_counts_the_commits_a_job_ran_and_keeps_the_last_value(rpc_module: types.ModuleType) -> None:
+    rpc = rpc_module.FreeCADRPC()
+    job_id = rpc.execute_code_async("commit(lambda: 1)\ncommit(lambda: {'volume': 'x' * 400})")["job_id"]
+    job = wait_for_job(rpc, job_id)
+    assert job["state"] == "done" and job["commits"] == 2
+    assert job["last_commit"].startswith("{'volume': 'xxx") and len(job["last_commit"]) == 201
+    quiet = wait_for_job(rpc, rpc.execute_code_async("pass")["job_id"])
+    assert "commits" not in quiet

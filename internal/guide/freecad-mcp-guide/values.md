@@ -48,6 +48,7 @@ Applies to obj_properties in create_object and update_object.
   - {"object_name": "Box", "faces": ["Face1", "Face2"]}
   - ["Box", "Face1"]
   - ["Box", ["Face1", "Face2"]]
+  - {"object_name": "Box", "edge": "Edge5"} or {"object_name": "Box", "edges": ["Edge5", "Edge6"]} for edges
 - Get the names from list_subelements. Read subelements.md.
 
 ## Placement
