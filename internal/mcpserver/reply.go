@@ -384,6 +384,18 @@ func loadNote(body string, res map[string]any) string {
 	return body
 }
 
+// placementNote adds the Placement now when the call set (part of) one, and the
+// Label when FreeCAD named the object differently from it.
+func placementNote(body string, res map[string]any) string {
+	if label := str(res, "label"); label != "" {
+		body += fmt.Sprintf("\n\nLabel: %q; the name other tools take is %q.", label, str(res, "object_name"))
+	}
+	if p := str(res, "placement"); p != "" {
+		body += "\n\nPlacement now: " + p + "."
+	}
+	return body
+}
+
 // quantityNote appends the quantity properties a create or update call set,
 // with the value and unit FreeCAD gives them, to body. A number on a quantity
 // property is in FreeCAD's base units, so this shows the caller what was

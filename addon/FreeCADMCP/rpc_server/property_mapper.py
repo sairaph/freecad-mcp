@@ -10,6 +10,7 @@ from typing import Any
 import FreeCAD
 
 from rpc_server.agent_log import agent_error
+from rpc_server.errors import tool_call
 
 
 @dataclass
@@ -199,12 +200,107 @@ def _set_dotted(obj: FreeCAD.DocumentObject, path: str, val: Any) -> None:
         leaf = names[i - 1]
 
 
+FILLET_TYPES = {"Part::Fillet": "Radius", "Part::Chamfer": "Size"}
+
+
+def _has_fillet_edges(obj: FreeCAD.DocumentObject) -> bool:
+    return _type_id(obj, "Edges") == "Part::PropertyFilletEdges"
+
+
+def _edge_size(value: Any, what: str) -> float:
+    if isinstance(value, str) and value.startswith("="):
+        raise ValueError(
+            f"{what} cannot be an expression: FreeCAD does not apply an expression to the "
+            "size of a Part::Fillet or Part::Chamfer edge. Give a number, and set it again "
+            "with update_object when the value it follows changes."
+        )
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or value <= 0:
+        raise ValueError(f"{what} must be a number above 0, not {value!r}.")
+    return float(value)
+
+
+def fillet_edge_entries(obj: FreeCAD.DocumentObject, val: Any, default: Any) -> list[tuple[int, float, float]]:
+    """The ``(edge id, size 1, size 2)`` entries of a Part::Fillet or Part::Chamfer
+    ``Edges`` value, and the edge names checked against the Base shape.
+
+    ``val`` is a list whose entries are an edge name (``"Edge3"``, sized by
+    ``default``, the Radius or Size given beside it), ``{"edge": "Edge3",
+    "radius": 2}`` (``"size"`` for a chamfer; ``"radius2"``/``"size2"`` for a
+    second size), or FreeCAD's own ``[3, 2, 2]``.
+    """
+    if not isinstance(val, (list, tuple)) or not val:
+        raise ValueError(
+            'Edges must be a list: ["Edge1", "Edge2"] with a Radius (Chamfer: Size), '
+            'or [{"edge": "Edge1", "radius": 2}].'
+        )
+    word = "Size" if obj.TypeId == "Part::Chamfer" else "Radius"
+    base_edges = None
+    base = getattr(obj, "Base", None)
+    try:
+        base_edges = len(base.Shape.Edges) if base is not None else None
+    except Exception:
+        pass
+    out = []
+    for entry in val:
+        if isinstance(entry, str):
+            name, first, second = entry, default, default
+        elif isinstance(entry, dict):
+            name = entry.get("edge")
+            first = entry.get("radius", entry.get("size", default))
+            second = entry.get("radius2", entry.get("size2", first))
+        elif isinstance(entry, (list, tuple)) and len(entry) == 3 and isinstance(entry[0], int):
+            name, first, second = f"Edge{entry[0]}", entry[1], entry[2]
+        else:
+            raise ValueError(f"Invalid edge entry {entry!r}; expected an edge name or {{\"edge\": \"Edge1\", \"{word.lower()}\": 2}}.")
+        if not (isinstance(name, str) and name.startswith("Edge") and name[4:].isdigit() and int(name[4:]) > 0):
+            raise ValueError(f"'{name}' is not an edge name such as Edge1.")
+        number = int(name[4:])
+        if base_edges is not None and number > base_edges:
+            raise ValueError(
+                f"Edge '{name}' does not exist on '{base.Name}', which has Edge1 to Edge{base_edges}. "
+                f"Call {tool_call('list_subelements', {'doc_name': obj.Document.Name, 'obj_name': base.Name, 'kind': 'edges'})} "
+                "to see its edges."
+            )
+        if first is None:
+            raise ValueError(f"Give the {word} for {name}: beside Edges, or as \"{word.lower()}\" in its entry.")
+        out.append((number, _edge_size(first, word), _edge_size(second, word)))
+    return out
+
+
+def _take_fillet_edges(obj: FreeCAD.DocumentObject, properties: dict[str, Any]):
+    """Split the Edges of a Part::Fillet or Part::Chamfer, and the Radius or Size
+    that goes with it, out of ``properties``; ``(rest, edges value, default)``.
+    Both names are no property of the object, so they never reach setattr."""
+    if not _has_fillet_edges(obj):
+        return properties, None, None
+    rest = dict(properties)
+    edges = rest.pop("Edges", None)
+    default = None
+    for key in ("Radius", "Size"):
+        if key in rest and key not in obj.PropertiesList:
+            default = rest.pop(key)
+    return rest, edges, default
+
+
 def set_object_property(
     doc: FreeCAD.Document, obj: FreeCAD.DocumentObject, properties: dict[str, Any]
 ):
     failures = []
+    properties, fillet_edges, fillet_default = _take_fillet_edges(obj, properties)
+    fillet_active = fillet_edges is not None or fillet_default is not None
+    if fillet_active:
+        # Last, so Base is set when the edges are checked against it.
+        properties = {**properties, "Edges": None}
     for prop, val in properties.items():
         try:
+            if prop == "Edges" and fillet_active:
+                if fillet_edges is None:
+                    # A new size alone resizes every edge already listed.
+                    size = _edge_size(fillet_default, "Radius" if obj.TypeId == "Part::Fillet" else "Size")
+                    obj.Edges = [(edge[0], size, size) for edge in obj.Edges]
+                else:
+                    obj.Edges = fillet_edge_entries(obj, fillet_edges, fillet_default)
+                continue
             if "." in prop and prop.split(".", 1)[0] in obj.PropertiesList:
                 _set_dotted(obj, prop, val)
             elif prop in obj.PropertiesList:

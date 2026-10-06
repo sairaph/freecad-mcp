@@ -11,12 +11,16 @@ factory here (``Part::Tube`` and the Draft shapes), and
 object after recompute and report the actual object name.
 """
 
+import math
+import re
+from typing import Any
+
 import FreeCAD
 import ObjectsFem
 
 from rpc_server.agent_log import agent_error, agent_warning
 from rpc_server.fem_loads import load_info
-from rpc_server.property_mapper import Object, quantity_values, set_object_property
+from rpc_server.property_mapper import FILLET_TYPES, Object, quantity_values, set_object_property
 from rpc_server.object_validation import object_validity_error
 from rpc_server.transactions import active_document, transaction
 
@@ -228,6 +232,15 @@ def _unregistered_type_message(obj_type: str) -> str:
 
 
 def _create_generic_object(doc: FreeCAD.Document, obj: Object):
+    if obj.type in FILLET_TYPES and not ("Base" in obj.properties and "Edges" in obj.properties):
+        # Without edges FreeCAD cannot compute it ("no suitable edges"), so an object
+        # made bare would only stay behind broken.
+        size = FILLET_TYPES[obj.type]
+        raise ValueError(
+            f"{obj.type} needs Base and Edges in obj_properties, for example "
+            f'{{"Base": "Box", "Edges": ["Edge1", "Edge2"], "{size}": 1}}; '
+            "call list_subelements with kind edges to see the edge names."
+        )
     try:
         res = doc.addObject(obj.type, obj.name)
     except Exception as e:
@@ -271,6 +284,51 @@ def _creation_failure(doc: FreeCAD.Document, tx, existing: set, error: Exception
     return f"{message}. Nothing was created."
 
 
+def _keep_requested_label(created: Any, requested: str) -> None:
+    """Give ``created`` the Label that was asked for when FreeCAD only changed
+    the characters its names cannot hold (a space becomes an underscore): the
+    Name has to be sanitised, the Label does not, and a 3MF or STEP file carries
+    the Label. A rename for another reason (Box taken, so Box001) is left alone."""
+    try:
+        if (
+            requested
+            and requested != created.Name
+            and created.Label == created.Name
+            and re.sub(r"[\W_]", "", requested) == re.sub(r"[\W_]", "", created.Name)
+        ):
+            created.Label = requested
+    except Exception:
+        pass
+
+
+def _name_and_placement_fields(obj: Any, requested: list) -> dict[str, Any]:
+    """The reply fields that show what the caller cannot see otherwise: the
+    Label when it differs from the Name, and the Placement now when one of the
+    properties set was (part of) it."""
+    fields: dict[str, Any] = {}
+    try:
+        if obj.Label != obj.Name:
+            fields["label"] = obj.Label
+        if any(key == "Placement" or key.startswith("Placement.") for key in requested):
+            place = obj.Placement
+            base, rotation = place.Base, place.Rotation
+
+            def n(value: float) -> str:
+                # Fixed decimals, not %g, which drops digits of a large value.
+                text = f"{value:.4f}".rstrip("0").rstrip(".")
+                return "0" if text in ("-0", "") else text
+
+            text = f"Base ({n(base.x)}, {n(base.y)}, {n(base.z)})"
+            angle = math.degrees(rotation.Angle)
+            if abs(angle) > 1e-9:
+                axis = rotation.Axis
+                text += f", rotated {n(angle)} deg about ({n(axis.x)}, {n(axis.y)}, {n(axis.z)})"
+            fields["placement"] = text
+    except Exception:
+        pass
+    return fields
+
+
 def create_object_gui(doc_name: str, obj: Object):
     """Create an object in ``doc_name`` according to ``obj.type``.
 
@@ -309,10 +367,12 @@ def create_object_gui(doc_name: str, obj: Object):
             except Exception as e:
                 return _creation_failure(doc, tx, existing, e)
 
+            _keep_requested_label(created, obj.name)
             doc.recompute()
             problem = object_validity_error(created)
             quantities = quantity_values(created, requested)
             load = load_info(created)
+            extra = _name_and_placement_fields(created, requested)
         # The transaction commits above regardless of problem, so an object
         # that failed to compute stays in the document; undo removes it, or
         # the caller can fix it with update_object or remove it with
@@ -324,7 +384,7 @@ def create_object_gui(doc_name: str, obj: Object):
                 "object_name": created.Name,
                 "error": problem,
             }
-        reply = {"success": True, "object_name": created.Name, **tx.reply_fields()}
+        reply = {"success": True, "object_name": created.Name, **tx.reply_fields(), **extra}
         if quantities:
             reply["quantities"] = quantities
         if load is not None:
@@ -358,6 +418,7 @@ def edit_object_gui(doc_name: str, obj: Object):
             problem = object_validity_error(obj_ins)
             quantities = quantity_values(obj_ins, obj.properties)
             load = load_info(obj_ins)
+            extra = _name_and_placement_fields(obj_ins, list(obj.properties))
         # Commits above regardless of problem, so a property change that left
         # the object invalid stays applied; undo reverts it.
         if problem:
@@ -368,7 +429,7 @@ def edit_object_gui(doc_name: str, obj: Object):
                 "error": problem,
             }
         FreeCAD.Console.PrintMessage(f"Object '{obj_ins.Name}' updated via RPC.\n")
-        reply = {"success": True, "object_name": obj_ins.Name, **tx.reply_fields()}
+        reply = {"success": True, "object_name": obj_ins.Name, **tx.reply_fields(), **extra}
         if quantities:
             reply["quantities"] = quantities
         if load is not None:

@@ -251,11 +251,10 @@ def _read_script(path: Any) -> tuple[tuple[str, str], None] | tuple[None, dict[s
 def _script_failure(error: Exception, script_path: str) -> dict[str, Any]:
     """The reply for a script file that raised on the GUI thread.
 
-    A reply carries only the exception's type and message; the traceback goes
-    to the Report View. For a file, the message also names the line of the
-    script that raised, so the caller can fix it without reading the Report
-    View. A SyntaxError's own text names only the file's base name, so it is
-    worded here with the full path.
+    The reply carries the exception's type and message, the line of the script
+    that raised, and the traceback, so the caller can fix it without reading
+    the Report View. A SyntaxError's own text names only the file's base name,
+    so it is worded here with the full path.
     """
     import traceback
 
@@ -274,7 +273,68 @@ def _script_failure(error: Exception, script_path: str) -> dict[str, Any]:
     agent_error(
         f"MCP RPC: GUI task raised {type(error).__name__}: {error}\n{traceback.format_exc()}"
     )
-    return fail(FREECAD_ERROR, message)
+    return {**fail(FREECAD_ERROR, message), "traceback": _traceback_text(error, None, script_path)}
+
+
+# Frames and characters of a traceback a reply carries: the end of it, where the cause is.
+_TRACEBACK_FRAMES = 8
+_TRACEBACK_CHARS = 3000
+
+
+def _traceback_text(error: BaseException, code: str | None, script_path: str | None) -> str:
+    """The traceback of ``error`` as a reply carries it: the frames of the script
+    itself and of the code it called, ending with the exception line.
+
+    The frames above the script (the dispatcher that runs it) are left out. The
+    source line of an inline script, which has no file for ``traceback`` to read
+    it from, comes from ``code``.
+    """
+    import traceback
+
+    own = script_path or "<string>"
+    frames = list(traceback.extract_tb(error.__traceback__))
+    for index, frame in enumerate(frames):
+        if frame.filename == own:
+            frames = frames[index:]
+            break
+    if code is not None:
+        lines = code.splitlines()
+        frames = [
+            traceback.FrameSummary(f.filename, f.lineno, f.name, line=lines[f.lineno - 1].strip())
+            if f.filename == "<string>" and not f.line and 0 < (f.lineno or 0) <= len(lines)
+            else f
+            for f in frames
+        ]
+    cut = len(frames) - _TRACEBACK_FRAMES
+    header = "Traceback (most recent call last):\n"
+    text = ""
+    if cut > 0:
+        text += f"  ... {cut} earlier frame(s) left out\n"
+        frames = frames[-_TRACEBACK_FRAMES:]
+    text += "".join(traceback.format_list(frames))
+    text += "".join(traceback.format_exception_only(type(error), error))
+    if len(header) + len(text) > _TRACEBACK_CHARS:
+        # Keep the header and the end, where the cause is; cut the middle, at a line.
+        marker = "  ... (middle of the traceback left out)\n"
+        tail = text[-(_TRACEBACK_CHARS - len(header) - len(marker)):]
+        # Start at the next line when that is near; a single huge line keeps its end.
+        newline = tail.find("\n", 0, 200)
+        text = marker + (tail[newline + 1:] if newline >= 0 else tail)
+    return (header + text).rstrip()
+
+
+def _code_failure(error: Exception, code: str) -> dict[str, Any]:
+    """The reply for inline code that raised on the GUI thread: the exception and its traceback."""
+    import traceback
+
+    agent_error(
+        f"MCP RPC: GUI task raised {type(error).__name__}: {error}\n{traceback.format_exc()}"
+    )
+    return {
+        "success": False,
+        "error": f"{type(error).__name__}: {error}",
+        "traceback": _traceback_text(error, code, None),
+    }
 
 
 def _query_on_gui(task: Callable[[], Any], operation: str) -> Any:
@@ -770,7 +830,7 @@ class FreeCADRPC:
                         _exec_in_namespace(code, script_path)
                 except Exception as e:
                     if script_path is None:
-                        raise
+                        return _code_failure(e, code)
                     return _script_failure(e, script_path)
             tx_fields.update(tx.reply_fields())
             return True

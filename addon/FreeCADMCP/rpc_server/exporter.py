@@ -774,6 +774,10 @@ def _export(doc_name: str, path: str, ext: str, opts: dict[str, Any]) -> dict[st
         "units": _units_for(ext, opts),
         "warnings": warnings,
     }
+    labels = {o.Name: o.Label for o in objects if o.Label != o.Name}
+    if labels:
+        # A 3MF or STEP file names its parts by label; the reply says which.
+        reply["labels"] = labels
     if mesh_info is not None:
         reply["mesh"] = mesh_info
     if companion_file is not None:

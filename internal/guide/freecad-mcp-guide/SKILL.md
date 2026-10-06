@@ -3,7 +3,7 @@ name: freecad-mcp-guide
 description: Workflows and rules for the freecad MCP server's tools. Use when building or changing FreeCAD models through create_object and update_object, choosing faces or edges with list_subelements, setting values with units or expressions, setting up and running a FEM analysis, checking and exporting parts for 3D printing, designing printed fits, threads and clips for a print material such as PETG or PLA, working with files on the FreeCAD computer, or sharing one FreeCAD with other agents.
 metadata:
   generator: freecad-mcp
-  version: "0.4.11"
+  version: "0.4.12"
 ---
 
 # FreeCAD MCP guide
@@ -28,6 +28,7 @@ Call the tools of the freecad server by their bare names, such as create_object.
 - Use execute_code only for what no tool covers. Read code.md.
 - An error before the object exists creates nothing: fix the argument and call create_object again. An object that was created but does not compute stays and the reply names it: fix it with update_object or delete_object. Never repeat the call with the same name.
 - Every changing call is one undo step. Call undo to revert.
+- Close a scratch document of your own when you are done: close_document with discard_changes true. It is the normal cleanup.
 - Changing tools attach a screenshot by default. Pass include_screenshot false on intermediate steps and call get_view at the end. get_object and list_objects attach none unless include_screenshot is true.
 
 ## Checklists
@@ -68,6 +69,8 @@ Share FreeCAD with other agents:
 1. Read session.md. Save, then call release_session or close_freecad when you stop.
 
 ## Guide files
+
+Each file named here sits in the same folder as this SKILL.md (the folder freecad-mcp-guide). Loading the skill loads only this page: read a file with your file tools when a line says to. Where the text of a file follows this page, use that.
 
 - values.md: quantities, units, expressions, links, Placement, colors. Read before any create_object or update_object that sets more than a plain length.
 - subelements.md: choosing faces and edges. Read before measure or a FEM constraint.

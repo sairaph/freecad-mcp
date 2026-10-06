@@ -394,12 +394,14 @@ class _Orbit(_Engine):
         self.rate = math.radians(degrees_per_second)
 
     def step(self, view: Any, dt: float) -> None:
-        # The rotation is about the world Z axis through the live focus point,
-        # the same maths as FreeCAD's own spin (a pre-multiplied rotation).
+        # The rotation is about the world Z axis through the live focus point.
+        # Coin's q1 * q2 turns by q1 first and then by q2, so the turn about the
+        # world axis goes last: turn * quat spun the camera about its own view
+        # axis instead (measured: the view direction never changed).
         coin = _coin()
         pose = read_pose(view)
         turn = coin.SbRotation(coin.SbVec3f(0, 0, 1), self.rate * dt)
-        pose.quat = (turn * coin.SbRotation(*pose.quat)).getValue()
+        pose.quat = (coin.SbRotation(*pose.quat) * turn).getValue()
         self.last = apply_pose(view, pose)
 
     def describe(self) -> dict[str, Any]:

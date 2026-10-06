@@ -116,7 +116,7 @@ func timeoutText(seconds int) string {
 
 const (
 	readPathText = "absolute path of the file on the computer running FreeCAD"
-	objPropsText = `properties. Lengths in mm and angles in degrees may be numbers; other quantities are strings with a unit ("100 N", "210 GPa"): a bare Force 100 is 0.1 N. A string starting with "=" is an expression ("=Params.h"); "=" alone removes it. Links take object names: "Box" or ["Box", "Cylinder"]. References: a list of {"object_name": "Box", "face": "Face1"}, {"object_name": "Box", "faces": ["Face1", "Face2"]}, ["Box", "Face1"] or ["Box", ["Face1", "Face2"]]; names from list_subelements. Placement: {"Base": {"x": 0, "y": 0, "z": 0}, "Rotation": {"Axis": {"x": 0, "y": 0, "z": 1}, "Angle": 45}}; one part: "Placement.Base.z": 5 or "=Params.h". Color: {"ViewObject": {"ShapeColor": [0.8, 0.2, 0.2, 1]}}.`
+	objPropsText = `properties. Lengths in mm and angles in degrees may be numbers; other quantities are strings with a unit ("100 N", "210 GPa"): a bare Force 100 is 0.1 N. A string starting with "=" is an expression ("=Params.h"); "=" alone removes it. Links take object names: "Box" or ["Box", "Cylinder"]. References: a list of {"object_name": "Box", "face": "Face1"}, {"object_name": "Box", "faces": ["Face1", "Face2"]}, ["Box", "Face1"] or ["Box", ["Face1", "Face2"]]; names from list_subelements. Fillet/Chamfer: Base, Edges ["Edge1"] and Radius (Size), or Edges [{"edge": "Edge1", "radius": 2}]. Placement: {"Base": {"x": 0, "y": 0, "z": 0}, "Rotation": {"Axis": {"x": 0, "y": 0, "z": 1}, "Angle": 45}}; one part: "Placement.Base.z": 5 or "=Params.h". Color: {"ViewObject": {"ShapeColor": [0.8, 0.2, 0.2, 1]}}.`
 )
 
 // pathText is the description of the path parameter of execute_code and
@@ -210,7 +210,7 @@ var toolTexts = map[string]toolText{
 		Params:      map[string]string{"include_screenshot": noScreenshotText},
 	},
 	"list_subelements": {
-		Description: `List the faces and edges of an object so you can pick sub-elements for measure and FEM References. Per face: name (Face1), surface type (plane, cylinder, cone, sphere, torus, other), area, centre, and normal (planes) or radius and axis (cylinders, spheres). Per edge: name (Edge1), curve type (line, circle, other), length, and radius and centre (circles). Coordinates are global, in mm. Call it instead of guessing face numbers. Read-only.`,
+		Description: `List the faces and edges of an object so you can pick sub-elements for measure and FEM References. Per face: name (Face1), surface type (plane, cylinder, cone, sphere, torus, other), area, centre, and normal (planes) or radius and axis (cylinders, spheres). Per edge: name (Edge1), curve type (line, circle, other), length, start and end points, along x, y or z for a line parallel to an axis (else its direction), and radius and centre (circles). Coordinates are global, in mm. Call it instead of guessing face numbers. Read-only.`,
 		Params:      map[string]string{"kind": "which sub-elements to list (default faces)"},
 	},
 	"create_object": {
@@ -269,13 +269,13 @@ FEM: create Fem::AnalysisPython first; pass analysis_name for its material, cons
 		Params: map[string]string{
 			"doc_name":     "document to capture (default: the active document's active view)",
 			"focus_object": "object name to frame (default: fit all); not with view_name Current",
-			"width":        "image width in pixels (default: the viewport's width; with width and height both omitted the longest edge is at most 1024)",
-			"height":       "image height in pixels (default: the viewport's height; with width and height both omitted the longest edge is at most 1024)",
+			"width":        "image width in pixels (with height omitted it follows the viewport's aspect; with both omitted the longest edge is at most 1024)",
+			"height":       "image height in pixels (with width omitted it follows the viewport's aspect; with both omitted the longest edge is at most 1024)",
 			"view_name":    "orientation (default Isometric); Current captures the camera as it is, without re-framing",
 		},
 	},
 	"set_view": {
-		Description: `Set what the user sees in a document's 3D view and leave it there: orientation, framing, which objects are visible, transparency and display modes. It changes the view, not the model: nothing to undo and no unsaved-changes mark. Mode static (default) sets the view now; orbit turns about the vertical axis around the scene; tour flies from stop to stop. An animated mode runs until the user moves the view, the next set_view call, reset true or the document closes; get_view still works meanwhile. reset true restores what earlier set_view calls changed. The reply and its screenshot show the view as set. Use get_view to look without changing anything.`,
+		Description: `Set what the user sees in a document's 3D view and leave it there: orientation, framing, which objects are visible, transparency and display modes. It changes the view, not the model: nothing to undo and no unsaved-changes mark. Mode static (default) sets the view now; orbit turns about the vertical axis around the scene; tour flies from stop to stop. An animated mode runs until the user moves the view, the next set_view call, reset true or the document closes; get_view still works meanwhile. reset true restores what earlier set_view calls changed. A set_view that stops a mode keeps the camera direction it had, reframes the scene, and reports that real direction; pass view_name for a standard one. The reply and its screenshot show the view as set. Use get_view to look without changing anything.`,
 		Params: map[string]string{
 			"doc_name":              "document whose 3D view to change (default: the active document); its tab is brought to the front",
 			"view_name":             "orientation to set (default: keep the current one)",

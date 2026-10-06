@@ -179,12 +179,20 @@ func (s *Server) executeCode(ctx context.Context, _ *mcp.CallToolRequest, in exe
 		return s.withNotice(timedFailure(ctx, "execute code", err, largerTimeout("execute_code"))), nil, nil
 	}
 	if !succeeded(res) {
-		fix := "Fix the code and retry; FreeCAD's Report View shows the traceback. "
+		traceback := str(res, "traceback")
+		fix := "Fix the code and retry. "
 		if in.Path != "" {
-			fix = "Fix the file and run it again with the same path; FreeCAD's Report View shows the traceback. "
+			fix = "Fix the file and run it again with the same path. "
 		}
-		return s.withNotice(reportedCode("execute code", res,
-			fix+"Call get_rpc_status if the GUI thread seems stuck. "+largerTimeout("execute_code"), codeFreeCAD)), nil, nil
+		if traceback != "" {
+			fix += "The traceback is below. "
+		}
+		out := reportedCode("execute code", res,
+			fix+"Call get_rpc_status if the GUI thread seems stuck. "+largerTimeout("execute_code"), codeFreeCAD)
+		if traceback != "" {
+			out.Content = append(out.Content, &mcp.TextContent{Text: "Traceback:\n" + textBlock(traceback)})
+		}
+		return s.withNotice(out), nil, nil
 	}
 	txName, txMerged := transactionFields(res)
 	out := render.SuccessResult(executeFront{Status: "ok", Transaction: txName},

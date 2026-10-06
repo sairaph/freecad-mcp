@@ -198,6 +198,17 @@ Draft::Polygon    FacesNumber, Radius
 Draft::Wire       Points (list of {x, y, z}), optional Closed
 ```
 
+`Part::Fillet` and `Part::Chamfer` take `Base` and `Edges` in `obj_properties`,
+both required (without edges FreeCAD cannot compute them, so the call is
+refused): `["Edge1", "Edge2"]` with `Radius` (a chamfer: `Size`), or
+`[{"edge": "Edge1", "radius": 2}]` for sizes that differ (`size` and `size2`
+for a chamfer). `update_object` takes the same, and a new `Radius` alone
+resizes the listed edges. A wrong edge name is an error naming the edge range
+and `list_subelements`. The size is a number: FreeCAD ignores an expression
+bound to an edge size, so one is refused. A Name FreeCAD sanitises (a space
+becomes an underscore) keeps the Label as asked, and the reply gives both;
+`create_object` and `update_object` also echo a `Placement` they set.
+
 Any other Python-implemented type must be built with `execute_code` instead.
 The Draft factories name objects themselves, so for those the returned object
 name can differ from the requested `obj_name`, which becomes the object's
@@ -381,7 +392,9 @@ in mm^2. Each face row gives its name (`Face1`), surface type (`plane`,
 `cylinder`, `cone`, `sphere`, `torus` or `other`), area and centre of mass,
 plus the normal of a plane and the radius and axis of a cylinder or sphere.
 Each edge row gives its name (`Edge1`), curve type (`line`, `circle` or
-`other`) and length, plus the radius and centre of a circle. Use it to find the
+`other`) and length, its start and end points, `along x`, `along y` or `along z` for a
+line parallel to an axis (otherwise its direction), plus the radius and centre
+of a circle. Use it to find vertical, horizontal, top and bottom edges, and the
 face to pass to `measure` as a `sub`, or to a `References` entry such as a FEM
 constraint's. An object with no shape, or an unknown object or document, is an
 error.
@@ -786,6 +799,10 @@ for OCCT work that may crash FreeCAD. Without a large enough `timeout`, a
 slow call reports a timeout while the task keeps running, and its result is
 lost.
 
+A script that raises returns the exception and its traceback (the last eight
+frames, with line numbers; `<string>, line N` for inline code), so a fix does
+not need FreeCAD's Report View.
+
 ### `execute_code_async`
 
 Execute Python code in FreeCAD without waiting for completion, for
@@ -964,7 +981,8 @@ document's active view is used. Either way, FreeCAD's camera and selection
 are left exactly as found afterwards (with `Current` they are never touched). When `width` and `height` are both
 omitted, the image has the viewport's size, scaled down to keep its aspect
 ratio when the longest edge exceeds 1024 pixels; with only one given, the
-other is the viewport's size in that direction. A reply carries at most 1
+other follows the viewport's aspect ratio, so the picture is the scene scaled,
+never a crop of it. A reply carries at most 1
 MiB, so an image too large to fit is refused with a hint to ask for a smaller
 one.
 

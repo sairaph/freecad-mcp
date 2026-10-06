@@ -197,6 +197,14 @@ func faceDetails(row map[string]any) string {
 
 func edgeDetails(row map[string]any) string {
 	var parts []string
+	if v, ok := row["start"]; ok {
+		parts = append(parts, "from "+formatVector(v)+" to "+formatVector(row["end"]))
+	}
+	if v := str(row, "along"); v != "" {
+		parts = append(parts, "along "+v)
+	} else if v, ok := row["direction"]; ok {
+		parts = append(parts, "direction "+formatVector(v))
+	}
 	if v, ok := row["radius"]; ok {
 		parts = append(parts, "radius "+formatNumber(v))
 	}
