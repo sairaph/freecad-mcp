@@ -52,7 +52,11 @@ func partFacts(obj map[string]any) []string {
 			formatNumber(size[0]), formatNumber(size[1]), formatNumber(size[2])))
 	}
 	if margin, ok := number(obj["free_margin_mm"]); ok {
-		facts = append(facts, fmt.Sprintf("free margin to the plate edges %.4g mm", margin))
+		fact := fmt.Sprintf("free margin to the plate edges %.4g mm", margin)
+		if margin == 0 {
+			fact += " (touches the plate edge, still inside)"
+		}
+		facts = append(facts, fact)
 	}
 	if str(obj, "overlap_checked_by") == "bounding box" {
 		facts = append(facts, "a mesh, so overlap is checked by its bounding box")

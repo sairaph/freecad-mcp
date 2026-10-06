@@ -72,8 +72,11 @@ def _resolve_screenshot_size(
     view_width, view_height = _get_view_size(view)
     if width is None and height is None:
         return _scale_to_max_edge(view_width, view_height, MAX_AUTO_SCREENSHOT_EDGE)
-    resolved_width = view_width if width is None else width
-    resolved_height = view_height if height is None else height
+    # One side given: the other follows the window's aspect, so the picture is
+    # the window's scene scaled, not a crop of it (a width of 400 on a 1521 x
+    # 709 window used to give 400 x 709).
+    resolved_width = round(height * view_width / view_height) if width is None else width
+    resolved_height = round(width * view_height / view_width) if height is None else height
     return _clamp_edge(resolved_width), _clamp_edge(resolved_height)
 
 

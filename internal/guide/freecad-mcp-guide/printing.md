@@ -16,7 +16,10 @@ Print each part in the pose it prints in. Lay every part flat on the plate with 
 
 ## Round edges
 
-- Round the edges of a part with one or two makeFillet calls, one for each set of edges with the same radius. Make one makeChamfer call for the edges a fillet fails on.
+- Edges that sit on the plate (both ends at the part's lowest z) get the chamfer the material file asks for: it stops the first layer flaring. Every other edge follows the user's request, so "round all edges" means round all but the bottom ones, which get the chamfer. Tell the user.
+- Find them with list_subelements and kind edges: each line gives its start and end, and "along z" or "along x" for a line parallel to an axis.
+- With the tools: create_object with obj_type Part::Fillet (or Part::Chamfer) and obj_properties {"Base": "Box", "Edges": ["Edge1", "Edge2"], "Radius": 1} (Chamfer: "Size"), or "Edges": [{"edge": "Edge1", "radius": 2}] for sizes that differ. A Fillet without Edges is refused. update_object with a new Radius resizes the listed edges. The size is a number: FreeCAD cannot bind it to a spreadsheet cell.
+- In a script: one or two makeFillet calls, one for each set of edges with the same radius. Make one makeChamfer call for the edges a fillet fails on.
 - Do not retry edge by edge or search the shape for edges again after each try. Read code.md, and run the script with execute_code_headless in the background when it may take minutes.
 
 ## Check
@@ -43,6 +46,7 @@ It reports per part its tight size, its free margin to each plate edge, and whic
 
 - Call export_document with a .stl or .3mf path.
 - 3MF keeps one object per part, named after its label, and declares mm. Slicers prefer it.
+- Names and labels differ when a name had to be changed: FreeCAD names hold no space, so create_object with obj_name "Base Plate" gives the name Base_Plate and the label Base Plate. Tools take the name; the file and the export reply show the label, and the reply names the object too.
 - For one file per part, pass per_object true, object_names, format stl (or step) and a folder as path. Each file is named after its object's label and the reply lists every file.
 - quality is coarse for previews, standard for FDM, fine for resin and small curved parts. linear_deflection and angular_deflection_deg override it.
 - Pass overwrite true when the file exists.

@@ -80,6 +80,23 @@ def _edge_row(name: str, edge: Any, Part: Any) -> dict[str, Any]:
         kind = "other"
     row["curve"] = kind
     row["length"] = _num(edge.Length)
+    try:
+        start = edge.valueAt(edge.FirstParameter)
+        end = edge.valueAt(edge.LastParameter)
+        row["start"] = _vector(start)
+        row["end"] = _vector(end)
+        if kind == "line":
+            direction = end - start
+            if direction.Length > 0:
+                direction.normalize()
+                row["direction"] = _vector(direction)
+                # An edge parallel to an axis is named by it, so vertical and
+                # horizontal edges tell apart at a glance.
+                for axis, value in zip("xyz", (direction.x, direction.y, direction.z)):
+                    if abs(abs(value) - 1.0) < 1e-6:
+                        row["along"] = axis
+    except Exception:
+        pass
     if kind == "circle":
         row["radius"] = _num(curve.Radius)
         row["center"] = _vector(curve.Center)
@@ -129,7 +146,9 @@ def list_subelements(doc_name: str, obj_name: str, kind: str = "faces") -> dict[
     ``kind`` is "faces", "edges" or "all". Reply: ``{"success", "document",
     "object", "kind", "faces"?: [{"name", "surface", "area", "center",
     "normal"? (planes), "radius"?, "axis"? (cylinders and spheres)}],
-    "edges"?: [{"name", "curve", "length", "radius"?, "center"? (circles)}]}``.
+    "edges"?: [{"name", "curve", "length", "start", "end", "direction"?
+    (lines), "along"? (a line parallel to the x, y or z axis), "radius"?,
+    "center"? (circles)}]}``.
     Units are millimetres and square millimetres. GUI thread, 60 s. No
     transaction.
     """

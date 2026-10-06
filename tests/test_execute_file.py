@@ -59,9 +59,43 @@ def test_syntax_error_in_a_file_names_the_file_and_its_line(
     assert result["error"] == f"SyntaxError: '(' was never closed ({path}, line 3)"
 
 
-def test_inline_code_still_reports_the_plain_error(rpc_module: types.ModuleType) -> None:
-    result = rpc_module.FreeCADRPC().execute_code("1 / 0")
-    assert result == {"success": False, "error": "ZeroDivisionError: division by zero"}
+def test_inline_code_error_carries_the_traceback_with_its_source_lines(rpc_module: types.ModuleType) -> None:
+    result = rpc_module.FreeCADRPC().execute_code("a = 1\ndef f():\n    return 1 / 0\nf()\n")
+    assert result["success"] is False
+    assert result["error"] == "ZeroDivisionError: division by zero"
+    assert result["traceback"].splitlines() == [
+        "Traceback (most recent call last):",
+        '  File "<string>", line 4, in <module>',
+        "    f()",
+        '  File "<string>", line 3, in f',
+        "    return 1 / 0",
+        "ZeroDivisionError: division by zero",
+    ]
+
+
+def test_file_error_carries_the_traceback_from_the_file_down(rpc_module: types.ModuleType, tmp_path: Path) -> None:
+    path = write_script(tmp_path, "def f():\n    raise ValueError('deep')\nf()\n")
+    result = rpc_module.FreeCADRPC().execute_file(path)
+    lines = result["traceback"].splitlines()
+    assert lines[0] == "Traceback (most recent call last):"
+    assert lines[1] == f'  File "{path}", line 3, in <module>' and lines[-1] == "ValueError: deep"
+    assert all("rpc_server.py" not in line for line in lines)
+
+
+def test_an_over_long_traceback_keeps_its_header_and_its_end(rpc_module: types.ModuleType) -> None:
+    code = "def f():\n    raise ValueError('x' * 5000 + ' the end')\nf()\n"
+    text = rpc_module.FreeCADRPC().execute_code(code)["traceback"]
+    assert text.startswith("Traceback (most recent call last):\n")
+    assert "(middle of the traceback left out)" in text
+    assert text.endswith("the end") and len(text) <= 3000
+
+
+def test_a_long_traceback_keeps_its_end(rpc_module: types.ModuleType) -> None:
+    chain = "".join(f"def f{i}():\n    return f{i + 1}()\n" for i in range(12))
+    code = chain + "def f12():\n    return 1 / 0\nf0()\n"
+    text = rpc_module.FreeCADRPC().execute_code(code)["traceback"]
+    assert "earlier frame(s) left out" in text and text.endswith("ZeroDivisionError: division by zero")
+    assert text.count("File ") == 8
 
 
 def test_missing_or_relative_or_unreadable_file_is_refused_before_any_run(

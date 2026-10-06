@@ -152,7 +152,14 @@ def _set_view_gui(doc_name: str | None, options: dict[str, Any]) -> dict[str, An
     focus_objects = []
     for name in focus:
         obj = doc.getObject(name)
-        if obj is None or getattr(obj, "ViewObject", None) is None:
+        if obj is None:
+            return fail(
+                NOT_FOUND,
+                f"Object '{name}' does not exist in document '{doc.Name}'.",
+                "Call " + tool_call("list_objects", {"doc_name": doc.Name, "compact": True})
+                + " to see the object names.",
+            )
+        if getattr(obj, "ViewObject", None) is None:
             return fail(
                 NOT_FOUND,
                 f"Object '{name}' has no view in document '{doc.Name}'.",

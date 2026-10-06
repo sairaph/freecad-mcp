@@ -16,6 +16,7 @@ Use a tool when one exists. Use code only for what no tool covers.
 - Print what you need back. Whatever the code prints is the reply.
 - It has a time budget to start and another to run, 90 seconds each unless the addon sets another. Pass timeout for slower work.
 - Pass include_screenshot false for code that does not change the model.
+- A script that raises returns the exception and its traceback: the last frames, with line numbers (a line of inline code is "<string>, line N").
 
 ## execute_code_async
 
@@ -31,7 +32,8 @@ Use a tool when one exists. Use code only for what no tool covers.
 - Use it for helical threads, lofts, sweeps, booleans with many tools and long rebuilds.
 - It runs on the computer running this MCP server and shares nothing with execute_code. Import FreeCAD and Part, open files with FreeCAD.openDocument(path), save with doc.save() or Shape.exportBrep(), and print progress.
 - After it saves a file that is open in FreeCAD, call reload_document.
-- A headless script that builds a boolean (Cut, Fuse, Common) sets Visibility False on its inputs, so the file opens showing only the result.
+- A document saved by a headless script opens under its file name, not the name the script gave it. Use the name open_document returns.
+- A Part::Cut, Part::Fuse or Part::Common object keeps its inputs visible. When a script saves one, set Visibility False on its inputs so the file opens showing only the result. A plain Part::Feature holding a result needs no such step.
 - A script that may take minutes runs in the background: pass background true, or a timeout over 120 seconds. The call returns a job_id at once and the output streams to a file. Call get_async_status with the job_id every 30 to 60 seconds: it reports running or finished, the exit code, the elapsed seconds and the last 200 lines of output. Pass cancel true to stop the job. A finished job's output file is removed after you read it.
 - Print progress in a long script, so get_async_status shows how far it got. Keep foreground calls short.
 - A failed script still returns everything it printed before the error, then the traceback. The script runs as __main__ with __file__ set to its own path. Code you pass runs from a temporary file that is deleted afterwards, so do not look for files beside it; a script you pass as path stays where it is.
@@ -76,6 +78,7 @@ print(bolt.isValid(), len(bolt.Solids), bolt.Volume)
 - A Placement or Rotation with angle 0 loses its axis: FreeCAD.Rotation(FreeCAD.Vector(0, 0, 1), 0) is the identity and reads back as axis (0, 0, 1) angle 0 whatever axis you gave. Do not read an axis from a zero angle.
 - Shape.BoundBox is loose on curved and swept shapes (a thread's box can be a third too wide). get_object and check_printability report the tight box. In a script, use Shape.optimalBoundingBox(False, False), never the vertices of a mesh.
 - Mesh.BoundBox and the Points of a Mesh already include its Placement. Do not add the Placement again. Read mesh.md.
+- Part::Cut takes one Base and one Tool. To cut several tools, fuse them first with one Part::MultiFuse and cut that.
 - A Part.Compound, which booleans often return, has no CenterOfMass. Take Shape.Solids[0], or iterate Shape.Solids and use each solid's CenterOfMass.
 - A helical thread cutter swept along a Part.makeHelix whose height is not a whole number of pitches can silently give an empty or zero-volume solid. Make the helix height a whole number of turns, then check the cutter's Volume > 0 before cutting.
 - Heavy geometry (sweeps, threads, many-tool booleans) belongs in execute_code_headless: a crash there does not take FreeCAD down.

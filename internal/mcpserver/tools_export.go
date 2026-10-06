@@ -144,7 +144,16 @@ func (s *Server) exportDocument(ctx context.Context, _ *mcp.CallToolRequest, in 
 	body.WriteString(createdFolderNote(res))
 
 	if names := stringItems(objects); len(names) > 0 {
-		fmt.Fprintf(&body, "\n\nExported: %s.", strings.Join(names, ", "))
+		// The file holds each object's label: name the object too where they differ.
+		labels, _ := res["labels"].(map[string]any)
+		shown := make([]string, len(names))
+		for i, name := range names {
+			shown[i] = name
+			if label, ok := labels[name].(string); ok {
+				shown[i] = fmt.Sprintf("%q (object %s)", label, name)
+			}
+		}
+		fmt.Fprintf(&body, "\n\nExported: %s.", strings.Join(shown, ", "))
 	}
 
 	if mesh, ok := res["mesh"].(map[string]any); ok {
