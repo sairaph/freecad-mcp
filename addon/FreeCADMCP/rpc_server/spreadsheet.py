@@ -407,6 +407,54 @@ def _validate_cell_updates(
     return normalized
 
 
+# A signed number with a unit: "-20 deg", "- 5 mm", "+1.5e2 mm". FreeCAD's cell
+# parser stores these as text, although "20 deg" becomes the quantity "=20 deg".
+_SIGNED_QUANTITY_RE = re.compile(r"^[+-]\s*(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?\s*[A-Za-z°µμ][^=]*$")
+
+
+def _set_cell_content(sheet: Any, address: str, content: str) -> bool:
+    """``sheet.set`` that keeps a signed quantity a quantity: when FreeCAD
+    stores such content as text, store it as the expression "=" + content and
+    return True, so ``_settle_signed_cells`` can check it once the whole batch
+    is in. Content that starts with ' is FreeCAD's own text mark and is never
+    changed. Any failure of the second set restores the content as entered."""
+    sheet.set(address, content)
+    if not isinstance(content, str) or not _SIGNED_QUANTITY_RE.match(content) or not sheet.getContents(address).startswith("'"):
+        return False
+    try:
+        sheet.set(address, "=" + content)
+    except Exception:
+        sheet.set(address, content)
+        return False
+    return True
+
+
+def _settle_signed_cells(sheet: Any, converted: dict[str, str]) -> None:
+    """Check the cells ``_set_cell_content`` turned into expressions
+    (address -> content as entered) with one recompute of the sheet, and
+    restore the entered content of each FreeCAD cannot use. FreeCAD stores an
+    expression it cannot parse as text again (an unknown unit); one it parses
+    but cannot evaluate reads back as an error once the sheet is recomputed (a
+    cell has no value before that). The cells are independent, so one
+    recompute settles them all."""
+    if not converted:
+        return
+    try:
+        sheet.recompute()
+        recomputed = True
+    except Exception:
+        recomputed = False
+    for address, content in converted.items():
+        try:
+            failed = not recomputed or not sheet.getContents(address).startswith("=")
+            if not failed:
+                failed = _error_message(sheet.get(address)) is not None
+        except Exception:
+            failed = True
+        if failed:
+            sheet.set(address, content)
+
+
 def update_spreadsheet_cells(
     doc_name: str,
     sheet_name: str,
@@ -484,6 +532,7 @@ def update_spreadsheet_cells(
         # of opening an empty linked "-> <name>" one in whatever document the
         # GUI has focused (transactions.active_document docstring).
         updated: list[str] = []
+        converted: dict[str, str] = {}
         did_recompute = False
         with active_document(doc), transaction("update_spreadsheet_cells") as tx:
             failure: dict[str, Any] | None = None
@@ -493,13 +542,16 @@ def update_spreadsheet_cells(
                     # content succeeds and the alias then raises, the content
                     # change already stuck and must still be rolled back.
                     if item["content"] is not None:
-                        sheet.set(address, item["content"])
+                        converted.pop(address, None)
+                        if _set_cell_content(sheet, address, item["content"]):
+                            converted[address] = item["content"]
                         if address not in updated:
                             updated.append(address)
                     if item["alias"] is not None:
                         sheet.setAlias(address, item["alias"] or None)
                         if address not in updated:
                             updated.append(address)
+                _settle_signed_cells(sheet, converted)
             except Exception as e:
                 # Pre-validation above rejects what it can recognise; this is
                 # the safety net for whatever it cannot (a reserved word, a

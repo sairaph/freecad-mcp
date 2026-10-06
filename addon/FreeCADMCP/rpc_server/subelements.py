@@ -64,6 +64,45 @@ def _on_bottom(part: Any, lowest: float | None) -> bool:
         return False
 
 
+# Two faces whose normals at the middle of their shared edge differ by less
+# than this (radians) join smoothly. Measured: the boundary edge of a fillet
+# gives exactly 0 and every crease of a box 1.5708, and FreeCAD's fillet and
+# chamfer refuse exactly the edges below this, so any value in between serves.
+_SMOOTH_ANGLE_RAD = 1e-3
+
+
+def _edge_faces(faces: list) -> dict[int, list[tuple[Any, int]]]:
+    """Edge hash -> the (edge, face index) pairs of the faces that hold it,
+    built in one pass over ``faces`` (read once: shape.Faces builds the whole
+    list on every access) instead of one search per edge."""
+    held: dict[int, list[tuple[Any, int]]] = {}
+    for index, face in enumerate(faces):
+        for edge in face.Edges:
+            held.setdefault(edge.hashCode(), []).append((edge, index))
+    return held
+
+
+def _join_kind(faces: list, edge: Any, held: dict[int, list[tuple[Any, int]]]) -> str | None:
+    """"seam" when ``edge`` is where one face meets itself (a cylinder's seam),
+    "smooth" when the two faces on it meet tangentially, else None (a crease,
+    an edge on a single face boundary, or anything unreadable)."""
+    try:
+        indexes = sorted({index for other, index in held.get(edge.hashCode(), []) if other.isSame(edge)})
+        sides = [faces[index] for index in indexes]
+        if len(sides) == 1:
+            return "seam" if edge.isSeam(sides[0]) else None
+        if len(sides) != 2:
+            return None
+        point = edge.valueAt((edge.FirstParameter + edge.LastParameter) / 2)
+        normals = []
+        for face in sides:
+            u, v = face.Surface.parameter(point)
+            normals.append(face.normalAt(u, v))
+        return "smooth" if normals[0].getAngle(normals[1]) < _SMOOTH_ANGLE_RAD else None
+    except Exception:
+        return None
+
+
 def _face_row(name: str, face: Any, Part: Any, lowest: float | None) -> dict[str, Any]:
     row: dict[str, Any] = {"name": name}
     try:
@@ -85,7 +124,7 @@ def _face_row(name: str, face: Any, Part: Any, lowest: float | None) -> dict[str
     return row
 
 
-def _edge_row(name: str, edge: Any, Part: Any, lowest: float | None) -> dict[str, Any]:
+def _edge_row(name: str, edge: Any, Part: Any, lowest: float | None, join: str | None = None) -> dict[str, Any]:
     row: dict[str, Any] = {"name": name}
     try:
         curve = edge.Curve
@@ -101,6 +140,10 @@ def _edge_row(name: str, edge: Any, Part: Any, lowest: float | None) -> dict[str
     row["length"] = _num(edge.Length)
     if edge.Length < _DEGENERATE_MM:
         row["degenerate"] = True
+    elif join is not None:
+        row["smooth"] = True
+        if join == "seam":
+            row["seam"] = True
     try:
         start = edge.valueAt(edge.FirstParameter)
         end = edge.valueAt(edge.LastParameter)
@@ -161,8 +204,14 @@ def _list_subelements_gui(doc_name: str, obj_name: str, kind: str) -> dict[str, 
             _face_row(f"Face{i}", face, Part, lowest) for i, face in enumerate(shape.Faces, 1)
         ]
     if kind in ("edges", "all"):
+        faces = shape.Faces
+        held = _edge_faces(faces)
         result["edges"] = [
-            _edge_row(f"Edge{i}", edge, Part, lowest) for i, edge in enumerate(shape.Edges, 1)
+            _edge_row(
+                f"Edge{i}", edge, Part, lowest,
+                None if edge.Length < _DEGENERATE_MM else _join_kind(faces, edge, held),
+            )
+            for i, edge in enumerate(shape.Edges, 1)
         ]
     return result
 
@@ -177,7 +226,9 @@ def list_subelements(doc_name: str, obj_name: str, kind: str = "faces") -> dict[
     "edges"?: [{"name", "curve", "length", "start", "end", "direction"?
     (lines), "along"? (a line parallel to the x, y or z axis), "radius"?,
     "center"? (circles), "degenerate"? (true for an edge with no length),
-    "on_bottom"?}]}``.
+    "smooth"? (true when the faces on the edge meet tangentially, or the edge
+    is a seam where one face meets itself; FreeCAD cannot fillet or chamfer
+    it), "seam"? (true for the second kind), "on_bottom"?}]}``.
     Units are millimetres and square millimetres. GUI thread, 60 s. No
     transaction.
     """

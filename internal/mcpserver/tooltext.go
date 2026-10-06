@@ -210,7 +210,7 @@ var toolTexts = map[string]toolText{
 		Params:      map[string]string{"include_screenshot": noScreenshotText},
 	},
 	"list_subelements": {
-		Description: `List the faces and edges of an object so you can pick sub-elements for measure and FEM References. Per face: name (Face1), surface type (plane, cylinder, cone, sphere, torus, other), area, centre, and normal (planes) or radius and axis (cylinders, spheres). Per edge: name (Edge1), curve type (line, circle, other), length, start and end points, along x, y or z for a line parallel to an axis (else its direction), and radius and centre (circles). A face or edge lying wholly at the shape's lowest z says "on the bottom"; an edge with no length says "degenerate": never pick it. Coordinates are global, in mm. Call it instead of guessing face numbers. Read-only.`,
+		Description: `List the faces and edges of an object so you can pick sub-elements for measure and FEM References. Per face: name (Face1), surface type (plane, cylinder, cone, sphere, torus, other), area, centre, and normal (planes) or radius and axis (cylinders, spheres). Per edge: name (Edge1), curve type (line, circle, other), length, start and end points, along x, y or z for a line parallel to an axis (else its direction), and radius and centre (circles). A face or edge lying wholly at the shape's lowest z says "on the bottom"; an edge with no length says "degenerate", and one whose faces meet without a corner (or a seam) says "smooth": never pick either to fillet or chamfer. Coordinates are global, in mm. Call it instead of guessing face numbers. Read-only.`,
 		Params:      map[string]string{"kind": "which sub-elements to list (default faces)"},
 	},
 	"create_object": {
@@ -231,7 +231,7 @@ FEM: create Fem::AnalysisPython first; pass analysis_name for its material, cons
 		Description: `Delete an object. Objects that use it (a Part::Cut's Base or Tool) may become invalid: call recompute_document afterwards to see which.`,
 	},
 	"recompute_document": {
-		Description: `Recompute a document and list every object that failed, with FreeCAD's message, every object still touched, and every boolean whose result is empty or removed nothing. Call it after a series of changes, after delete_object, or when a document needs a recompute. Failures do not fail the call; fix them with update_object or delete_object.`,
+		Description: `Recompute a document and list every object that failed, with FreeCAD's message, every object still touched, and every boolean whose result is empty or removed nothing. Call it after a series of changes, after delete_object, or when a document needs a recompute. A failed fillet or chamfer says what to do, and a dependent says which failed object it waits for. Failures do not fail the call; fix them with update_object or delete_object.`,
 		Params:      map[string]string{"timeout": timeoutText(120)},
 	},
 	"undo": {
@@ -309,7 +309,7 @@ FEM: create Fem::AnalysisPython first; pass analysis_name for its material, cons
 			"sheet_name":      "Spreadsheet::Sheet object name, as list_objects shows it",
 			"cells":           "1 to 500 cells; each needs content, alias or both",
 			"cells[].cell":    "address such as B2, or an existing alias",
-			"cells[].content": `a number with optional unit ("10 mm"), text, or an expression starting with = ("=Length*2"); "" clears the cell`,
+			"cells[].content": `a number with optional unit ("10 mm", "-20 deg"), text, or an expression starting with = ("=Length*2"); "" clears the cell`,
 			"cells[].alias":   `alias for expressions as <sheet_name>.<alias>; "" removes it`,
 			"recompute":       "recompute afterwards (default true)",
 		},
@@ -352,7 +352,7 @@ FEM: create Fem::AnalysisPython first; pass analysis_name for its material, cons
 			"object_names": "object names to check (default: visible top-level solids and meshes)",
 			"bed_x":        "plate width in mm, x from the plate's corner",
 			"bed_y":        "plate depth in mm, y from the plate's corner",
-			"bed_z":        "build height in mm, z from 0 (default: height not checked)",
+			"bed_z":        "build height in mm, z from 0; without it the reply says the height was not checked",
 			"bed_origin_x": "x of the plate's corner in mm, for a plate laid beside the first (default 0)",
 			"bed_origin_y": "y of the plate's corner in mm (default 0)",
 			"timeout":      timeoutText(120),

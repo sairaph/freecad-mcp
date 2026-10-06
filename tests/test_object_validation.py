@@ -11,7 +11,7 @@ ADDON_DIR = Path(__file__).resolve().parents[1] / "addon" / "FreeCADMCP"
 if str(ADDON_DIR) not in sys.path:
     sys.path.insert(0, str(ADDON_DIR))
 
-from rpc_server.object_validation import object_validity_error
+from rpc_server.object_validation import invalid_object_row, object_validity_error
 
 from test_gui_dispatch import reset_transactions_import
 
@@ -471,3 +471,76 @@ def test_a_cut_whose_tool_misses_the_base_warns_on_create_and_update() -> None:
         edited = object_factory.edit_object_gui("Doc", object_factory.Object(name="Clip", properties={}))
     expected = "The tool does not reach the base: nothing was removed. Check their Placement."
     assert created["warning"] == expected and edited["warning"] == expected
+
+
+def failing(name: str, type_id: str = "Part::Fillet", status: str = "", states=("Touched", "Invalid"), **links) -> types.SimpleNamespace:
+    obj = types.SimpleNamespace(
+        Name=name, Label=name, TypeId=type_id, State=list(states), OutList=[], isValid=lambda: "Invalid" not in states,
+        getStatusString=lambda: status,
+    )
+    for key, value in links.items():
+        setattr(obj, key, value)
+    return obj
+
+
+def test_a_fillet_that_lost_an_edge_says_what_to_do() -> None:
+    base = types.SimpleNamespace(Name="Stand")
+    for message in ("Missing edge link: ;Edge7;:M;FUS;:H7bb:7,E.Edge26.", "NCollection_IndexedMap::FindKey"):
+        fillet = failing("StandFillet", status=message, Base=base)
+        row = invalid_object_row(fillet)
+        assert row["status"].startswith(message.rstrip("."))
+        assert row["status"].endswith("An edge it rounds no longer exists in Stand after the change. Call list_subelements on Stand and set Edges again.")
+        assert "Call list_subelements on Stand" in object_validity_error(fillet)
+
+
+def test_a_rounding_that_is_too_large_says_so_and_other_failures_are_left_alone() -> None:
+    base = types.SimpleNamespace(Name="Box")
+    fillet = failing("Round", status="BRep_API: command not done", Base=base)
+    assert invalid_object_row(fillet)["status"].endswith("The radius is probably too large for these edges: try a smaller radius or fewer edges, and leave out degenerate edges.")
+    chamfer = failing("Cut", type_id="Part::Chamfer", status="BRep_API: command not done", Base=base)
+    assert "The size is probably too large for these edges: try a smaller size or fewer edges, and leave out degenerate edges." in invalid_object_row(chamfer)["status"]
+    assert invalid_object_row(failing("Cut", type_id="Part::Cut", status="BRep_API: command not done"))["status"] == "BRep_API: command not done"
+    assert invalid_object_row(failing("Round", status="Some other message", Base=base))["status"] == "Some other message"
+
+
+def test_a_touched_object_names_the_nearest_failed_object_it_waits_for() -> None:
+    fillet = failing("StandFillet", status="NCollection_IndexedMap::FindKey", Base=types.SimpleNamespace(Name="Stand"))
+    middle = failing("Middle", type_id="Part::Fuse", status="Touched.", states=("Touched",))
+    middle.OutList = [fillet]
+    final = failing("Final", type_id="Part::Cut", status="Touched.", states=("Touched",))
+    final.OutList = [types.SimpleNamespace(Name="Tool", State=["Up-to-date"], OutList=[], isValid=lambda: True), middle]
+
+    row = invalid_object_row(final)
+    assert row["status"] == "waits for StandFillet, which failed."
+    assert row["waits_for"] == "StandFillet"
+    assert "waits for StandFillet, which failed." in object_validity_error(final)
+    # The failed object itself, and a Touched object with no failed dependency, say what they said before.
+    assert invalid_object_row(fillet)["waits_for"] == ""
+    lone = failing("Lone", type_id="Part::Cut", status="Touched.", states=("Touched",))
+    assert invalid_object_row(lone) == {"name": "Lone", "label": "Lone", "type": "Part::Cut", "state": ["Touched"], "status": "Touched.", "waits_for": ""}
+
+
+def test_the_dependency_search_runs_once_per_reported_object(monkeypatch) -> None:
+    from rpc_server import object_validation
+
+    fillet = failing("StandFillet", status="NCollection_IndexedMap::FindKey", Base=types.SimpleNamespace(Name="Stand"))
+    final = failing("Final", type_id="Part::Cut", status="Touched.", states=("Touched",))
+    final.OutList = [fillet]
+    calls = []
+    real = object_validation.failed_dependency
+    monkeypatch.setattr(object_validation, "failed_dependency", lambda obj: calls.append(obj.Name) or real(obj))
+
+    report = object_validation.invalid_objects_report([fillet, final])
+
+    assert report["invalid_count"] == 2
+    assert calls == ["StandFillet", "Final"]
+
+
+def test_an_edge_that_cannot_be_rounded_says_which_edges_to_leave_out() -> None:
+    base = types.SimpleNamespace(Name="Soft")
+    expected = "An edge in Edges cannot be rounded: call list_subelements on Soft and leave out edges marked degenerate or smooth."
+    for type_id in ("Part::Fillet", "Part::Chamfer"):
+        row = invalid_object_row(failing("Round", type_id=type_id, status="There are no suitable edges for chamfer or fillet", Base=base))
+        assert row["status"] == "There are no suitable edges for chamfer or fillet. " + expected
+    other = failing("Cut", type_id="Part::Cut", status="There are no suitable edges for chamfer or fillet", Base=base)
+    assert invalid_object_row(other)["status"] == "There are no suitable edges for chamfer or fillet"

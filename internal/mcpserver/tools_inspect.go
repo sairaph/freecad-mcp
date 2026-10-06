@@ -217,6 +217,11 @@ func edgeDetails(row map[string]any) string {
 	if boolField(row, "degenerate") {
 		parts = append(parts, "degenerate (no length, a pole of a rounded corner): never pick it")
 	}
+	if boolField(row, "seam") {
+		parts = append(parts, "smooth (a seam: the face meets itself): never fillet or chamfer it")
+	} else if boolField(row, "smooth") {
+		parts = append(parts, "smooth (its two faces meet without a corner): never fillet or chamfer it")
+	}
 	if boolField(row, "on_bottom") {
 		parts = append(parts, "on the bottom")
 	}

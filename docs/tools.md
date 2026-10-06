@@ -432,7 +432,13 @@ line parallel to an axis (otherwise its direction), plus the radius and centre
 of a circle. A face or edge that lies wholly at the shape's lowest z says `on
 the bottom` (the edges that sit on the print plate), and an edge with no
 length, such as the pole of a rounded corner, says `degenerate`: never pick
-it. Use it to find vertical, horizontal, top and bottom edges, and the
+it. An edge where two faces meet tangentially (the boundary of a fillet; the
+normals at its middle differ by less than 1e-3 rad) says `smooth`, and so does a
+seam where one face meets itself (a cylinder's): FreeCAD cannot fillet or
+chamfer either, so never pick them for that (JSON rows: `smooth`, plus `seam`
+for the second kind). The edge-to-face map is built once per call, so the edge
+list costs about twice the face list (0.6 s against 0.3 s for 100 solids with
+1500 edges). Use it to find vertical, horizontal, top and bottom edges, and the
 face to pass to `measure` as a `sub`, or to a `References` entry such as a FEM
 constraint's. An object with no shape, or an unknown object or document, is an
 error.
@@ -562,7 +568,11 @@ The reply shows each changed cell's new value and any objects that became
 invalid; undo reverts the whole change in one step. Its content column is
 FreeCAD's stored text: an expression or a number with a unit starts with `=`
 (`=5 mm`), text starts with `'`, and a plain number has no mark; the reply says
-so. A bad address or alias in
+so. FreeCAD's own cell parser stores a signed number with a unit (`-20
+deg`, `- 5 mm`, `+5 mm`) as text; the tool stores it as the expression
+(`=-20 deg`) so it stays a quantity, unless FreeCAD cannot evaluate it (an
+unknown unit stays text) or the content starts with `'`, FreeCAD's own text
+mark. A bad address or alias in
 the batch (already used, syntactically invalid, or a reserved word such as a
 unit or a constant) is rejected before anything is changed. A failure caught
 only once FreeCAD applies it rolls this call's own changes back: when it
@@ -683,8 +693,9 @@ once.
 - `object_names` (array of strings, optional): default the visible top-level
   solids and meshes.
 - `bed_x`, `bed_y` (numbers, required, up to 10000 mm): plate width and depth.
-- `bed_z` (number, optional, up to 10000 mm): build height; default not
-  checked.
+- `bed_z` (number, optional, up to 10000 mm): build height. Without it the
+  reply ends with `Height not checked: pass bed_z with the printer's build
+  height.`
 - `bed_origin_x`, `bed_origin_y` (numbers, optional, default 0, in mm): the
   plate's corner, so a second plate laid beside the first can be checked with
   its real size; the plate then spans x from `bed_origin_x` to `bed_origin_x +
@@ -777,6 +788,26 @@ break), or when `open_document` reports the document needs a recompute. The
 reply lists each failed object with FreeCAD's status message, and each object
 still touched afterwards. Fix a failed object with `update_object` or remove
 it with `delete_object`; failures do not make the call itself fail.
+
+A failed object's row carries FreeCAD's own message, and for a `Part::Fillet` or
+`Part::Chamfer` what to do about it: when the message says an edge is missing
+(`Missing edge link`, `NCollection_IndexedMap::FindKey`) the row adds `An edge
+it rounds no longer exists in <Base> after the change. Call list_subelements on
+<Base> and set Edges again.`; for `BRep_API: command not done`, which is
+OpenCascade's generic failure (measured for a size that does not fit, and for a
+size of 0), `The radius is probably too large for these edges: try a
+smaller radius or fewer edges, and leave out degenerate edges.` (`size` for a
+chamfer). An edge that cannot be rounded at all gives
+`There are no suitable edges for chamfer or fillet` (measured for degenerate
+edges, for edges where two faces join smoothly such as the boundary of a
+rounded edge, and for a cylinder's seam; a sharp edge of the same solid works),
+and the row adds `An edge in Edges cannot be rounded: call list_subelements on
+<Base> and leave out edges marked degenerate or smooth.` An
+object that is only Touched because a dependency failed says `waits for
+StandFillet, which failed.` (the nearest failed object it depends on) and its fix
+hint names that object. The same rows appear in the invalid objects of
+`create_object`, `update_object`, `update_spreadsheet_cells` and the other
+replies that list them.
 
 FreeCAD calls an empty boolean valid, so after the invalid objects the reply
 also lists the results that hold nothing useful: `Empty or no-op results:
