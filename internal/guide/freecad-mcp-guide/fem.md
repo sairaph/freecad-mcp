@@ -28,6 +28,8 @@ Solve a static stress problem with CalculiX. Create every FEM object with create
 - The analysis needs one material, one mesh, at least one fixed support and at least one load.
 - The mesh is second order by default. Keep it: first order tetrahedra lock in bending and give stress and deflection about three times too small. A mesh of first order gets a warning from run_fem_analysis. Set ElementOrder to 2nd with update_object to mesh it again.
 - run_fem_analysis meshes a Gmsh mesh again when its solid changed since it was meshed, and says so. update_object on a mesh that changes its Shape or a meshing parameter (CharacteristicLengthMax, ElementOrder) meshes it at once and gives the node count.
+- Constraints must reference the solid the mesh meshes. After you replace the solid (a Part::Cut of the old one, say), point the mesh Shape at the new solid with update_object (it meshes again), then set the References of each constraint to faces of the new solid from list_subelements. The run refuses constraints that still name the old one.
+- References and the mesh Shape take the solid itself, never an App::Link to it: FreeCAD crashes on a link there (any link kind), so the call is refused and names the object the link points to.
 - A force along an edge, or normal to a planar face: pass Direction, for example "Direction": {"object_name": "Body", "edge": "Edge5"}. The reply states the direction.
 
 ## Check the result
@@ -39,7 +41,7 @@ Solve a static stress problem with CalculiX. Create every FEM object with create
 
 ## Read the result
 
-- run_fem_analysis returns max and min von Mises stress in MPa, max displacement in mm, the node count, the result object, the working directory, and every load with its magnitude and direction.
+- run_fem_analysis returns max and min von Mises stress in MPa, max displacement in mm, where each peak is (the position of its node, in mm: "max von Mises = 223.3 MPa at (30, 7.5, 8)"), the node count, the result object, the working directory, and every load with its magnitude and direction.
 - Its screenshot is coloured by von Mises stress, the way FreeCAD shows a result, and the reply gives the range of the colour scale in MPa. The solid and the mesh are hidden so the result shows. Show one again with update_object and {"ViewObject": {"Visibility": true}}. A shown solid covers the stress colours: hide it again, or use get_view to look. The colour bar is labelled in Pa (1e6 Pa = 1 MPa).
 - To look at the result, keep the solid hidden (the run hides it) and use set_view isolate on the result object, not on the solid: a shown solid covers the colours.
 - The colours need a 3D view. Without one the reply carries only the numbers.

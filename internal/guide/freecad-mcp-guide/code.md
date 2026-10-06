@@ -25,6 +25,8 @@ Use a tool when one exists. Use code only for what no tool covers.
 - The code runs off the GUI thread. It must not touch the GUI or the document: no FreeCADGui, no view or selection calls, no object creation, no property changes, no recompute, no save. Doing so can hang FreeCAD.
 - Hand every document or view write to the GUI thread with commit(fn), which runs fn there and returns its result.
 - Pattern: fetch shapes into module variables with execute_code, compute in the background, then commit(apply).
+- commit(fn) returns fn's result to the script. Store what you need in a module variable (global result, set inside fn) and read it with execute_code afterwards. get_async_status shows how many commit calls ran and the last return value, cut short.
+- Read an expensive FreeCAD attribute once into a variable. FemMesh.Nodes builds the whole node table on every access: nodes = mesh.FemMesh.Nodes, then index nodes. A loop that reads it per node freezes FreeCAD for minutes.
 
 ## execute_code_headless
 

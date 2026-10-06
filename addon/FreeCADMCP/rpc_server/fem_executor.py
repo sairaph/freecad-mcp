@@ -149,6 +149,73 @@ def missing_references(analysis) -> list[tuple[str, str, str]]:
     return missing
 
 
+def _is_part_of(target, shape_obj) -> bool:
+    """Whether ``target`` is the solid ``shape_obj`` or stands for it: the Tip of
+    a Body, a member of a container such as a Body or an App::Part or a child of a
+    Part::Compound. A Cut's inputs are not it."""
+    if target is None or shape_obj is None:
+        return False
+    if target.Name == shape_obj.Name:
+        return True
+    tip = getattr(shape_obj, "Tip", None)
+    if tip is not None and tip.Name == target.Name:
+        return True
+    # A member of a container, or a child of a Part::Compound.
+    members = list(getattr(shape_obj, "Group", None) or []) + list(getattr(shape_obj, "Links", None) or [])
+    return any(member.Name == target.Name for member in members)
+
+
+def references_off_the_mesh(analysis) -> list[tuple[str, str, str, str]]:
+    """Every ``(constraint, referenced object, mesh, meshed object)`` where a
+    constraint's References name an object other than the one the analysis's mesh
+    meshes (a Cut made after the constraints, with the mesh pointed at it): the
+    face names then belong to another shape and do not tell where the load acts."""
+    meshes = [m for m in analysis.Group if _fem_type(m) in (GMSH_TYPE, "Fem::FemMeshNetgen")]
+    targets = [(m, meshed_shape(m)) for m in meshes]
+    targets = [(m, t) for m, t in targets if t is not None]
+    if not targets:
+        return []
+    found = []
+    for member in analysis.Group:
+        try:
+            references = list(getattr(member, "References", None) or [])
+        except Exception:
+            continue
+        for link in references:
+            try:
+                target = link[0]
+            except Exception:
+                continue
+            if target is None or any(_is_part_of(target, shape) for _, shape in targets):
+                continue
+            mesh, shape = targets[0]
+            found.append((member.Name, target.Name, mesh.Name, shape.Name))
+    return found
+
+
+def _peak_positions(result_obj, von_mises: list, displacements: list) -> dict:
+    """Where the largest von Mises stress and the largest displacement are: the
+    position of their mesh nodes, as ``[x, y, z]`` in mm. The node table of a
+    FemMesh is rebuilt on every access, so it is read once. {} when the result
+    has no node numbers to match or a position cannot be read."""
+    try:
+        numbers = list(getattr(result_obj, "NodeNumbers", None) or [])
+        mesh = getattr(result_obj, "Mesh", None)
+        if not numbers or mesh is None:
+            return {}
+        nodes = mesh.FemMesh.Nodes
+        found = {}
+        for key, values in (("max_von_mises_at", von_mises), ("max_displacement_at", displacements)):
+            if values and len(values) == len(numbers):
+                point = nodes.get(numbers[max(range(len(values)), key=values.__getitem__)])
+                if point is not None:
+                    found[key] = [round(point.x, 4), round(point.y, 4), round(point.z, 4)]
+        return found
+    except Exception as e:
+        agent_warning(f"MCP RPC: could not find where the FEM result peaks: {type(e).__name__}: {e}\n")
+        return {}
+
+
 def _remesh_changed(analysis) -> list[dict]:
     """Mesh again every Gmsh mesh of the analysis whose solid changed since it
     was meshed. Returns what was done, one entry per mesh."""
@@ -274,6 +341,19 @@ def run_fem_analysis(doc_name: str, analysis_name: str) -> dict:
                     + " to see the faces, then set the constraint's References again with update_object.",
                 )
 
+            stage = "mesh check"
+            off = references_off_the_mesh(analysis)
+            if off:
+                constraint, target, mesh, shape = off[0]
+                more = f" ({len(off) - 1} more like it)" if len(off) > 1 else ""
+                return fail(
+                    INVALID_INPUT,
+                    f"{constraint} references {target}, but {mesh} meshes {shape}: point References at faces of {shape} "
+                    f"(list_subelements){more}.",
+                    "Call " + tool_call("list_subelements", {"doc_name": doc_name, "obj_name": shape, "kind": "faces"})
+                    + f" to see the faces of {shape}, then set the References of each constraint with update_object.",
+                )
+
             stage = "remeshing"
             remeshed = _remesh_changed(analysis)
 
@@ -343,6 +423,7 @@ def run_fem_analysis(doc_name: str, analysis_name: str) -> dict:
                 "max_von_mises_MPa": max(vm) if vm else None,
                 "min_von_mises_MPa": min(vm) if vm else None,
                 "max_displacement_mm": max(disp) if disp else None,
+                **_peak_positions(result_obj, vm, disp),
                 "loads": loads,
                 "meshes": meshes,
                 "working_dir": work_dir,

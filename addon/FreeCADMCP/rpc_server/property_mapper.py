@@ -18,6 +18,7 @@ class Object:
     name: str
     type: str | None = None
     analysis: str | None = None
+    body: str | None = None
     properties: dict[str, Any] = field(default_factory=dict)
 
 
@@ -86,6 +87,31 @@ def parse_reference_entry(entry: Any) -> tuple[str, str | list[str]]:
     return ref_name, subs
 
 
+#: TypeIds of every link kind (App::Link, App::LinkElement, App::LinkGroup and
+#: their Python variants) start with this.
+_LINK_TYPE_PREFIX = "App::Link"
+
+
+def reject_app_link(ref_obj: Any, what: str) -> None:
+    """Refuse an App::Link where FreeCAD needs the object itself: a FEM
+    constraint's References or a Gmsh mesh's Shape given a link crash FreeCAD
+    (an access violation) or fail inside it, so the call never reaches it."""
+    type_id = getattr(ref_obj, "TypeId", "")
+    if not type_id.startswith(_LINK_TYPE_PREFIX):
+        return
+    try:
+        target = ref_obj.getLinkedObject().Name
+    except Exception:
+        target = None
+    if type_id.startswith("App::LinkGroup"):
+        use = f"point {what} at the objects it groups"
+    elif target and target != ref_obj.Name:
+        use = f"point {what} at {target}, the object it links"
+    else:
+        use = f"point {what} at the object it links"
+    raise ValueError(f"{ref_obj.Name} is an {type_id}: {use}.")
+
+
 def resolve_references(doc: FreeCAD.Document, val: Any) -> list[tuple[Any, Any]]:
     """Resolve a ``References`` list into ``(DocumentObject, sub_elements)`` tuples."""
     refs = []
@@ -94,6 +120,7 @@ def resolve_references(doc: FreeCAD.Document, val: Any) -> list[tuple[Any, Any]]
         ref_obj = doc.getObject(ref_name)
         if ref_obj is None:
             raise ValueError(f"Referenced object '{ref_name}' not found.")
+        reject_app_link(ref_obj, "References")
         refs.append((ref_obj, subs))
     return refs
 
@@ -396,10 +423,15 @@ def set_object_property(
                     # One sub-element link (a force's Direction): the forms
                     # References takes for one sub-element.
                     ref_name, subs = parse_reference_entry(val)
-                    setattr(obj, prop, (_link_object(doc, ref_name), [subs] if isinstance(subs, str) else subs))
+                    target = _link_object(doc, ref_name)
+                    reject_app_link(target, prop)
+                    setattr(obj, prop, (target, [subs] if isinstance(subs, str) else subs))
 
                 elif isinstance(val, str) and _link_kind(obj, prop) == "single":
-                    setattr(obj, prop, _link_object(doc, val))
+                    target = _link_object(doc, val)
+                    if prop in ("Shape", "Part") and {"CharacteristicLengthMax", "MaxSize"} & set(obj.PropertiesList):
+                        reject_app_link(target, "Shape")
+                    setattr(obj, prop, target)
 
                 elif _link_kind(obj, prop) == "list" and (
                     isinstance(val, str)

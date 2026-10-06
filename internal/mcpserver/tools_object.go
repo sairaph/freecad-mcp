@@ -25,6 +25,7 @@ type createObjectInput struct {
 	ObjType       string      `json:"obj_type"`
 	ObjName       string      `json:"obj_name"`
 	AnalysisName  *string     `json:"analysis_name,omitempty"`
+	BodyName      *string     `json:"body_name,omitempty"`
 	ObjProperties *Properties `json:"obj_properties,omitempty"`
 	screenshotOptions
 }
@@ -101,11 +102,16 @@ func (s *Server) createObject(ctx context.Context, req *mcp.CallToolRequest, in 
 	if in.AnalysisName != nil {
 		analysis = *in.AnalysisName
 	}
+	var body any
+	if in.BodyName != nil {
+		body = *in.BodyName
+	}
 	objData := map[string]any{
 		"Name":       in.ObjName,
 		"Type":       in.ObjType,
 		"Properties": props,
 		"Analysis":   analysis,
+		"Body":       body,
 	}
 	res, err := conn.CreateObject(ctx, in.DocName, objData)
 	if err != nil {

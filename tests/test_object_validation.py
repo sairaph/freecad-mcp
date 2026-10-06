@@ -67,7 +67,7 @@ def load_object_factory(
     doc: FakeDocument,
 ) -> Iterator[types.ModuleType]:
     """Load object_factory with minimal FreeCAD/ObjectsFem test doubles."""
-    module_names = ["FreeCAD", "ObjectsFem", "rpc_server.property_mapper", "rpc_server.transactions"]
+    module_names = ["FreeCAD", "ObjectsFem", "rpc_server.property_mapper", "rpc_server.partdesign", "rpc_server.transactions"]
     missing = object()
     saved = {name: sys.modules.get(name, missing) for name in module_names}
 
@@ -105,6 +105,7 @@ def load_object_factory(
     sys.modules["FreeCAD"] = freecad
     sys.modules["ObjectsFem"] = types.ModuleType("ObjectsFem")
     sys.modules.pop("rpc_server.property_mapper", None)
+    sys.modules.pop("rpc_server.partdesign", None)
     reset_transactions_import()
 
     module_name = f"_object_factory_test_{id(doc)}"
@@ -217,7 +218,7 @@ def test_create_object_returns_failure_with_created_object_name() -> None:
     with load_object_factory(doc) as object_factory:
         request = object_factory.Object(
             name="Pad",
-            type="PartDesign::Pad",
+            type="Part::Extrusion",
             properties={},
         )
         result = object_factory.create_object_gui("Doc", request)

@@ -291,6 +291,9 @@ func (s *Server) getAsyncStatus(ctx context.Context, _ *mcp.CallToolRequest, in 
 		state = "unknown"
 	}
 	text := fmt.Sprintf("Async job %s: %s", id, state)
+	if n := intField(job, "commits"); n > 0 {
+		text += fmt.Sprintf("\ncommit() ran %d time(s); the last returned %s", n, str(job, "last_commit"))
+	}
 	if e := str(job, "error"); e != "" {
 		text += "\nError: " + shortMessage(e)
 	}

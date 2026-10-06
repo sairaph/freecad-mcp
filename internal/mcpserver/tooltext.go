@@ -116,7 +116,7 @@ func timeoutText(seconds int) string {
 
 const (
 	readPathText = "absolute path of the file on the computer running FreeCAD"
-	objPropsText = `properties. Lengths in mm and angles in degrees may be numbers; other quantities are strings with a unit ("100 N", "210 GPa"): a bare Force 100 is 0.1 N. A string starting with "=" is an expression ("=Params.h"); "=" alone removes it. Links take names: "Box" or ["Box", "Cylinder"]. References: a list of {"object_name": "Box", "face": "Face1"} ("faces" takes a list, "edge" an edge), ["Box", "Face1"] or ["Box", ["Face1", "Face2"]]; Direction takes one entry; names from list_subelements. Fillet/Chamfer: Base, Edges ["Edge1"] and Radius (Size), or Edges [{"edge": "Edge1", "radius": 2}]. Placement: {"Base": {"x": 0, "y": 0, "z": 0}, "Rotation": {"Axis": {"x": 0, "y": 0, "z": 1}, "Angle": 45}}; one part: "Placement.Base.z": 5 or "=Params.h". Color: {"ViewObject": {"ShapeColor": [r, g, b, a]}}.`
+	objPropsText = `properties. Lengths (mm) and angles (degrees) may be numbers; other quantities are strings with a unit ("100 N"). "=Params.h" binds an expression; "=" alone removes it. Links take names: "Box" or ["Box", "Cylinder"]. References: a list of {"object_name": "Box", "face": "Face1"}, ["Box", "Face1"] or ["Box", ["Face1", "Face2"]]. Fillet/Chamfer: Base, Edges ["Edge1"], Radius (Size). Sketch: AttachmentSupport takes the References forms ("XY_Plane" is the Body's); Geometry [{"rectangle": {"corner": [0, 0], "size": [w, h]}}, {"circle": {"center": [x, y], "radius": r}}, {"line": [[x1, y1], [x2, y2]]}, {"arc": {"center": [x, y], "radius": r, "start_angle": 0, "end_angle": 90}}]. Placement: {"Base": {"x": 0, "y": 0, "z": 0}, "Rotation": {"Axis": {"x": 0, "y": 0, "z": 1}, "Angle": 45}}.`
 )
 
 // pathText is the description of the path parameter of execute_code and
@@ -214,12 +214,14 @@ var toolTexts = map[string]toolText{
 		Params:      map[string]string{"kind": "which sub-elements to list (default faces)"},
 	},
 	"create_object": {
-		Description: `Create one object in a document. Use the name the reply returns (Box may become Box001). The reply gives the shape (solids, size, volume), warns of an empty result or a no-op Cut, and lists the quantities set, the edges of a fillet or chamfer, and the objects that went hidden (booleans, compounds, Fillet and others hide theirs), and objects it made fail. An error creates nothing; an object that fails to compute stays: fix or delete it.
-FEM: create Fem::AnalysisPython first; pass analysis_name for its material, constraints and mesh; then run_fem_analysis. Fem::MaterialCommon takes Material as {"Name": "Steel", "YoungsModulus": "210 GPa", "PoissonRatio": 0.3, "Density": "7900 kg/m^3"}. Fem::FemMeshGmsh takes Shape (the solid) and CharacteristicLengthMax/Min in mm; it meshes on creation, second order unless ElementOrder is set. A Fem::ConstraintForce acts along its face's outward normal or along Direction (an edge), a Fem::ConstraintPressure into the face; Reversed true flips either.`,
+		Description: `Create one object in a document. Use the name the reply returns (Box may become Box001). The reply gives the shape (solids, size, volume) and the quantities set, warns of an empty result or a no-op Cut, and lists a fillet's edges and the objects that went hidden or failed. An error creates nothing; an object that fails to compute stays: fix or delete it.
+PartDesign: a feature or sketch goes into a Body (body_name, else the Body its links point into, else the only one); the reply names the Body and its Tip.
+FEM: create Fem::AnalysisPython first; pass analysis_name for its material, constraints and mesh; then run_fem_analysis. Fem::MaterialCommon takes Material {"Name", "YoungsModulus": "210 GPa", "PoissonRatio", "Density": "7900 kg/m^3"}. Fem::FemMeshGmsh takes Shape (the solid) and CharacteristicLengthMax/Min in mm, meshes on creation, second order unless ElementOrder is set. A force acts along its face's normal or Direction (an edge), a pressure into the face; Reversed flips either.`,
 		Params: map[string]string{
 			"obj_type":       `FreeCAD type, such as Part::Box, Part::Cylinder, Part::Cut, PartDesign::Body, Spreadsheet::Sheet, Fem::AnalysisPython, Fem::ConstraintFixed. Of the Python-only types only these work: Part::Tube (needs InnerRadius, OuterRadius, Height), Draft::Circle (Radius), Draft::Rectangle (Length, Height), Draft::Polygon (FacesNumber, Radius), Draft::Wire (Points, optional Closed); build others with execute_code`,
 			"obj_name":       "name for the new object; the reply gives the name actually used (Draft types name themselves and keep this as the Label)",
 			"analysis_name":  "Fem::AnalysisPython object to add this FEM object to; required for Fem::FemMeshGmsh",
+			"body_name":      "PartDesign::Body for a PartDesign feature or sketch (default: the Body its links point into, else the document's only Body)",
 			"obj_properties": objPropsText,
 		},
 	},
@@ -397,7 +399,7 @@ FEM: create Fem::AnalysisPython first; pass analysis_name for its material, cons
 
 	// FEM.
 	"run_fem_analysis": {
-		Description: `Run CalculiX on a FEM analysis and return max and min von Mises stress (MPa), max displacement (mm), node count, the result object and the working directory. It meshes again a Gmsh mesh whose solid changed since it was meshed, warns of a first order mesh, and fails on a load on a missing face or an all-zero result. The analysis needs, all made with create_object and analysis_name: a Fem::MaterialCommon, a Fem::FemMeshGmsh of the solid, a Fem::ConstraintFixed and a Fem::ConstraintForce or Fem::ConstraintPressure on faces from list_subelements. A CalculiX solver is added when missing. It colours the 3D view by von Mises stress and hides the FEM mesh and the meshed solid; the reply names them and how to show them again. It blocks FreeCAD's GUI thread until done: do not send other calls meanwhile; get_rpc_status still answers.`,
+		Description: `Run CalculiX on a FEM analysis and return max and min von Mises stress (MPa), max displacement (mm) with where each maximum is, node count, the result object and the working directory. It meshes again a Gmsh mesh whose solid changed since it was meshed, warns of a first order mesh, and fails on a load on a missing face, a constraint on another object than the meshed solid, or an all-zero result. The analysis needs, all made with create_object and analysis_name: a Fem::MaterialCommon, a Fem::FemMeshGmsh of the solid, a Fem::ConstraintFixed and a Fem::ConstraintForce or Fem::ConstraintPressure on faces from list_subelements. A CalculiX solver is added when missing. It colours the 3D view by von Mises stress and hides the FEM mesh and the meshed solid; the reply names them and how to show them again. It blocks FreeCAD's GUI thread until done: do not send other calls meanwhile; get_rpc_status still answers.`,
 		Params: map[string]string{
 			"analysis_name": "Fem::AnalysisPython object name",
 			"timeout":       "seconds to wait for the solver (default 600)",
@@ -436,7 +438,7 @@ Scripts share one namespace across calls. get_async_status gives state, error an
 		},
 	},
 	"get_async_status": {
-		Description: `Report background jobs: execute_code_async jobs (running, done or failed, with error and traceback) and execute_code_headless jobs (running, finished or cancelled, exit code, elapsed seconds, the last 200 lines of output). Answers while a job runs. Async jobs are kept until FreeCAD exits; headless jobs until the MCP server exits or a day after they finish. Stop a headless job with cancel_job. A call- job is a call that ran past the background limit: it returns that call's own reply when it ends.`,
+		Description: `Report background jobs: execute_code_async jobs (running, done or failed, with error and traceback, and how many commit() calls ran and the last one's return value) and execute_code_headless jobs (running, finished or cancelled, exit code, elapsed seconds, the last 200 lines of output). Answers while a job runs. Async jobs are kept until FreeCAD exits; headless jobs until the MCP server exits or a day after they finish. Stop a headless job with cancel_job. A call- job is a call that ran past the background limit: it returns that call's own reply when it ends.`,
 		Params: map[string]string{
 			"job_id": "job_id from execute_code_async, execute_code_headless or a call that moved to the background (default: all running jobs and up to 20 recent ones)",
 		},

@@ -180,6 +180,8 @@ Create a new object in a document.
 - `obj_name` (string, required): the name to give the object.
 - `analysis_name` (string, optional): for FEM objects, the FEM analysis to add
   the object to.
+- `body_name` (string, optional): for a PartDesign feature or a sketch, the
+  `PartDesign::Body` it goes into (see [PartDesign](#partdesign-bodies-and-sketches)).
 - `obj_properties` (object, optional): the properties to set at creation,
   for example `{"Height": 30, "Radius": 10}`.
 - `include_screenshot` (boolean, default `true`), `view_name` (string, default
@@ -211,6 +213,47 @@ becomes an underscore) keeps the Label as asked, and the reply gives both;
 The reply of a fillet or chamfer call lists its edges as they are now
 (`Edges now: Edge1 r4, Edge3 r2 to r4.`, `s` for a chamfer) when `Edges`,
 `Radius` or `Size` was set.
+
+### PartDesign bodies and sketches
+
+A new PartDesign feature (any `PartDesign::` type but the Body) goes into a
+Body the way FreeCAD's own commands put it there (`Body.newObject`, which also
+sets `BaseFeature` and `Tip`). Which Body: `body_name`; else the Body the
+`Profile`, `Base` or `AttachmentSupport` points into; else the document's only
+Body. A `body_name` that differs from the Body a link points into is refused, naming both. With none, or with several and nothing to tell them apart, the call is
+refused and names the Bodies. A `Sketcher::SketchObject` goes into a Body only
+when `body_name` is given or its `AttachmentSupport` is a feature of a Body, a
+face of one, or a plane of its origin; other sketches stay outside. The reply
+says `In Body 'Body' (Tip: Pad).`, with `body` (`name`, `tip`) in the JSON.
+
+A sketch takes `AttachmentSupport` (FreeCAD 1.0 renamed `Support`; `Support` is
+mapped to it with a note in the reply) in the forms of `References`:
+`"XY_Plane"`, `{"object_name": "Pad", "face": "Face6"}`, `["Pad", "Face6"]`,
+`[["Pad", ["Face6"]]]`. A bare `X_Axis`, `Y_Axis`, `Z_Axis`, `XY_Plane`,
+`XZ_Plane` or `YZ_Plane` is the origin feature of the Body the sketch goes into
+(with several Bodies and no `body_name` it is refused as ambiguous). A face
+that does not exist is an error with a `list_subelements` hint. `MapMode` is
+`FlatFace` unless set (FreeCAD's default, `Deactivated`, leaves a sketch with a
+support unattached; measured). The support is set after the sketch is in its
+Body: measured on FreeCAD 1.1, `Body.addObject` keeps it.
+
+`Geometry` (create_object or update_object on a sketch) is a list of
+`{"line": [[x1, y1], [x2, y2]]}`, `{"circle": {"center": [x, y], "radius": r}}`,
+`{"arc": {"center": [x, y], "radius": r, "start_angle": a, "end_angle": b}}`
+(degrees, counter-clockwise from the start to the end) and
+`{"rectangle": {"corner": [x, y], "size": [w, h]}}` (four lines with coincident
+corners), in mm in the sketch's own coordinates. Everything is checked before
+the sketch changes; the geometry of the sketch is replaced, with its
+constraints. The reply says how many: `Replaced the geometry and its 4 constraints.` Constraints cannot be set with this tool. The reply says
+`Sketch: 4 geometry elements, closed profile.` (`sketch`: `geometry_count`,
+`closed`); a sketch with no geometry says `Sketch: no geometry yet.` and has no
+`Shape:` line.
+
+`PartDesign::Fillet` and `PartDesign::Chamfer` take `Base` (the object name),
+`Edges` (`["Edge1", "Edge2"]`) and `Radius` (`Size`), mapped to FreeCAD's
+`Base` link `(object, [edges])`. PartDesign has one size for all edges: an
+entry with its own size is refused. `update_object` takes `Edges` too. The
+reply lists `Edges now: Edge1 r1.5, Edge2 r1.5.`
 
 `Part::Fillet`, `Part::Chamfer`, `Part::Extrusion`, `Part::Revolution` and
 `Part::Thickness` hide their source object, as FreeCAD's own commands do, so
@@ -318,6 +361,8 @@ Set properties of an existing object, in the same form `create_object` takes
 - `obj_name` (string, required): the object to update.
 - `obj_properties` (object, required): the properties to set.
 - `include_screenshot`, `view_name`: see [screenshot options](#screenshot-options).
+
+An update is all or nothing: when any property fails (a failure in mesh generation adds "the mesh itself may hold a partial result: run_fem_analysis remeshes it"; the reply fields that only report, such as the shape or quantities, are dropped with a log warning when they cannot be read, and never fail the change), the call's transaction is aborted, so none of them is applied, no undo step is left, and the error ends with "Nothing was changed." (not claimed when the call joined a transaction the user had open). An object that is invalid after a successful set stays changed, as reported.
 
 Use it when `create_object` cannot set a property at creation time, then
 verify the result with `get_object`. The reply lists the quantity properties
@@ -775,7 +820,9 @@ send parallel requests. `get_rpc_status` and `get_async_status` stay
 answerable while it runs.
 
 The reply gives the maximum and minimum von Mises stress (MPa), the maximum
-displacement (mm), the node count, the result object's name, the working
+displacement (mm), where each maximum is (`max_von_mises_at`,
+`max_displacement_at`: the position of the node, in mm; the summary says `max
+von Mises = 223.3 MPa at (30, 7.5, 8)`), the node count, the result object's name, the working
 directory CalculiX wrote to, and every force and pressure of the analysis with
 its magnitude and direction. The summary line gives the element order of the mesh (`3746 nodes, 2nd order`). With a 3D view the screenshot is coloured by von
 Mises stress the way FreeCAD shows a result (the result pipeline's von Mises
@@ -789,10 +836,19 @@ only. On failure it returns the prerequisite check or
 solver error with the working directory for triage; `list_objects` shows what
 the analysis holds.
 
+`References` and `Direction` of a constraint and the `Shape` of a Gmsh or Netgen mesh must name the object itself: a link
+(`App::Link`, `App::LinkElement`, `App::LinkGroup`) there crashes FreeCAD (an access violation) or fails inside it, so
+`create_object` and `update_object` refuse it before FreeCAD sees it (`Beam_link is an App::Link: point References at
+Beam, the object it links.`) and change nothing.
+
 Before solving, the run checks that every constraint's faces (its `References`
 and a force's `Direction`) still exist on their objects; a missing one is an
 error naming the constraint, the face and the object, with a `list_subelements`
-hint. It then meshes again every Gmsh mesh whose solid changed since it was
+hint. It also checks that each constraint's `References` name the solid the mesh
+meshes (or its Tip or a member, for a Body or a container; a child of a `Part::Compound`): after a `Part::Cut`
+made later and the mesh pointed at it, a constraint still naming the old solid is
+refused (`Load references Bar, but Mesh meshes HoleBar: point References at faces
+of HoleBar (list_subelements)`). It then meshes again every Gmsh mesh whose solid changed since it was
 meshed, and says so: `Remeshed Mesh: Beam changed since it was meshed (3746 ->
 3888 nodes).` The tool stores a fingerprint of the meshed shape (tight box,
 volume, surface area, centre of mass, face count, the type, area and centre of
@@ -1021,7 +1077,8 @@ Report the state of background jobs started by `execute_code_async` and by
 
 For an `execute_code_async` job it reports whether the job is running, done or
 failed, with the error and traceback of a failed job, and never its printed
-output; history is held in memory until FreeCAD exits. For a headless job (its id starts with
+output. Once `commit()` has run it also says how many calls ran and the repr of
+the last one's return value (cut at 200 characters; `commits`, `last_commit`); history is held in memory until FreeCAD exits. For a headless job (its id starts with
 `headless-`) it reports `running`, `finished` or `cancelled`, the exit code,
 the elapsed seconds and the last 200 lines of output; see
 `execute_code_headless`. It does not use the GUI thread, so it answers even

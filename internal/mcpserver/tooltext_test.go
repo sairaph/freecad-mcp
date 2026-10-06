@@ -95,7 +95,7 @@ var snakeToken = regexp.MustCompile(`\b[a-z]+(?:_[a-z0-9]+)+\b`)
 var otherWords = map[string]bool{
 	"already_running": true, "not_running": true, "version_check": true, "gui_dispatch": true, "cpu_cores": true,
 	"asset_creation_strategy": true, "object_name": true, "object_names": true,
-	"parts_library": true,
+	"parts_library": true, "start_angle": true, "end_angle": true,
 }
 
 // TestTextsNameOnlyExistingTools fails when a tool description, parameter
